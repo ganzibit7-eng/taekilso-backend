@@ -33,8 +33,9 @@ module.exports = async (req, res) => {
   let extra = {};
  
   try {
-    // 무엇이 됐든, 요청이 들어왔다는 사실 자체를 가장 먼저 기록합니다.
-    await debugRef.set({
+    // 요청이 들어왔다는 기록은 응답 속도를 늦추지 않도록 기다리지 않고(비동기로) 남깁니다.
+    // (페이앱이 응답을 기다리는 시간이 있어서, 여기서 시간을 끌면 "고객사 응답 실패"가 날 수 있습니다)
+    debugRef.set({
       receivedAt: admin.firestore.FieldValue.serverTimestamp(),
       method: req.method,
       body: req.body || null,
