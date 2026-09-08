@@ -1,4 +1,4 @@
-@'
+
 // 카카오 로그인을 실제 Firebase 로그인 세션으로 이어주는 함수입니다.
 const admin = require('firebase-admin');
 
@@ -47,4 +47,4 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'SERVER_ERROR' });
   }
 };
-'@ | Out-File -Encoding utf8 api\kakao-custom-token.js
+
