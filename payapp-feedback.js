@@ -1,7 +1,6 @@
 // Vercel Serverless Function — 페이앱이 결제 완료를 서버끼리 직접 통보하는 곳입니다.
-// 기존 Firebase Cloud Function(payappFeedback)과 로직은 완전히 동일하고,
-// firebase-admin으로 여전히 같은 Firestore 데이터베이스에 접근합니다.
-// Vercel은 Google Cloud 소속이 아니라서, 서비스 계정 키를 직접 넣어줘야 합니다.
+// Vercel 대시보드의 Runtime Logs가 잘 안 보이는 경우가 많아서(알려진 문제),
+// 무슨 일이 있었는지 Firestore의 debugLogs 컬렉션에 직접 기록해서 확실하게 확인할 수 있게 합니다.
 
 const admin = require('firebase-admin');
 
@@ -10,7 +9,6 @@ if (!admin.apps.length) {
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      // Vercel 환경변수에 줄바꿈이 \n 문자로 들어오기 때문에 실제 줄바꿈으로 되돌려줍니다.
       privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n')
     })
   });
@@ -29,8 +27,21 @@ function postValue(body, key) {
 }
 
 module.exports = async (req, res) => {
+  const debugId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const debugRef = db.collection('debugLogs').doc(debugId);
+  let result = 'UNKNOWN';
+  let extra = {};
+
   try {
-    if (req.method !== 'POST') return res.status(405).send('METHOD_NOT_ALLOWED');
+    // 무엇이 됐든, 요청이 들어왔다는 사실 자체를 가장 먼저 기록합니다.
+    await debugRef.set({
+      receivedAt: admin.firestore.FieldValue.serverTimestamp(),
+      method: req.method,
+      body: req.body || null,
+      hasLinkvalEnv: !!PAYAPP_LINKVAL
+    }).catch(() => {});
+
+    if (req.method !== 'POST') { result = 'METHOD_NOT_ALLOWED'; return res.status(405).send(result); }
 
     const body = req.body || {};
     const userid = postValue(body, 'userid');
@@ -40,35 +51,30 @@ module.exports = async (req, res) => {
     const price = Number(postValue(body, 'price'));
     const payState = Number(postValue(body, 'pay_state'));
     const mulNo = postValue(body, 'mul_no');
+    extra = { userid, linkval, orderId, goodname, price, payState, mulNo };
 
-    // 디버깅용: 페이앱이 실제로 뭘 보냈는지, 어느 검증에서 걸리는지 로그로 남깁니다.
-    console.log('[payapp-feedback] 수신된 원본 body:', JSON.stringify(body));
-    console.log('[payapp-feedback] 파싱값:', { userid, linkval, orderId, goodname, price, payState, mulNo });
-
-    // 브라우저를 신뢰하지 않고, 페이앱이 보낸 값을 여기서 직접 검증합니다.
-    if (userid !== PAYAPP_USERID) { console.log('[payapp-feedback] INVALID_USER:', userid); return res.status(200).send('INVALID_USER'); }
-    if (!linkval || linkval !== PAYAPP_LINKVAL) { console.log('[payapp-feedback] INVALID_LINKVAL. 받은값:', linkval, '/ 환경변수 설정여부:', !!PAYAPP_LINKVAL); return res.status(200).send('INVALID_LINKVAL'); }
-    if (!orderId || !/^TAK-[A-Z0-9]+-[A-Z0-9]+$/.test(orderId)) { console.log('[payapp-feedback] INVALID_ORDER:', orderId); return res.status(200).send('INVALID_ORDER'); }
-    if (price !== PREMIUM_PRICE) { console.log('[payapp-feedback] INVALID_PRICE:', price); return res.status(200).send('INVALID_PRICE'); }
-    if (goodname !== '택일소 프리미엄 30일 이용권') { console.log('[payapp-feedback] INVALID_PRODUCT:', goodname); return res.status(200).send('INVALID_PRODUCT'); }
+    if (userid !== PAYAPP_USERID) { result = 'INVALID_USER'; return res.status(200).send(result); }
+    if (!linkval || linkval !== PAYAPP_LINKVAL) { result = 'INVALID_LINKVAL'; return res.status(200).send(result); }
+    if (!orderId || !/^TAK-[A-Z0-9]+-[A-Z0-9]+$/.test(orderId)) { result = 'INVALID_ORDER'; return res.status(200).send(result); }
+    if (price !== PREMIUM_PRICE) { result = 'INVALID_PRICE'; return res.status(200).send(result); }
+    if (goodname !== '택일소 프리미엄 30일 이용권') { result = 'INVALID_PRODUCT'; return res.status(200).send(result); }
 
     const ref = db.collection('paymentOrders').doc(orderId);
     const snap = await ref.get();
-    if (!snap.exists) { console.log('[payapp-feedback] UNKNOWN_ORDER:', orderId); return res.status(200).send('UNKNOWN_ORDER'); }
+    if (!snap.exists) { result = 'UNKNOWN_ORDER'; return res.status(200).send(result); }
     const order = snap.data();
-    console.log('[payapp-feedback] 찾은 주문:', JSON.stringify(order));
+    extra.order = order;
 
     if (order.amount !== PREMIUM_PRICE || order.product !== PREMIUM_PRODUCT) {
-      console.log('[payapp-feedback] INVALID_ORDER_DATA. 주문:', JSON.stringify(order));
-      return res.status(200).send('INVALID_ORDER_DATA');
+      result = 'INVALID_ORDER_DATA';
+      return res.status(200).send(result);
     }
 
     if (order.status === 'paid' && order.mul_no === mulNo) {
-      console.log('[payapp-feedback] 이미 처리된 주문(중복 통보):', orderId);
+      result = 'SUCCESS_ALREADY_PAID';
       return res.status(200).send('SUCCESS');
     }
 
-    console.log('[payapp-feedback] pay_state:', payState, payState === 4 ? '→ 프리미엄 지급 시도' : '→ 완료 상태 아님, 지급 안함');
     if (payState === 4) {
       await db.runTransaction(async (tx) => {
         const latest = await tx.get(ref);
@@ -91,7 +97,6 @@ module.exports = async (req, res) => {
           premiumMulNo: mulNo || null
         }, { merge: true });
 
-        // 관리자 대시보드의 "총 구매수"는 실제로 검증된 이 시점에만 올라갑니다.
         const statsRef = db.collection('stats').doc('counters');
         tx.set(statsRef, {
           purchases: admin.firestore.FieldValue.increment(1)
@@ -107,6 +112,7 @@ module.exports = async (req, res) => {
         });
       });
 
+      result = 'SUCCESS_GRANTED';
       return res.status(200).send('SUCCESS');
     }
 
@@ -118,9 +124,12 @@ module.exports = async (req, res) => {
       }, { merge: true });
     }
 
+    result = 'SUCCESS_NOT_PAID_STATE';
     return res.status(200).send('SUCCESS');
   } catch (error) {
-    console.error('PayApp feedback error:', error);
+    result = 'EXCEPTION: ' + (error && error.message);
     return res.status(500).send('ERROR');
+  } finally {
+    await debugRef.set({ result, extra: JSON.parse(JSON.stringify(extra)) }, { merge: true }).catch(() => {});
   }
 };
