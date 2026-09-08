@@ -1,8 +1,6 @@
-
 {
   "functions": {
-    "api/payapp-feedback.js": { "runtime": "nodejs20.x" },
-    "api/kakao-custom-token.js": { "runtime": "nodejs20.x" }
+    "api/payapp-feedback.js": {},
+    "api/kakao-custom-token.js": {}
   }
 }
-
