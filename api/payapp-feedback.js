@@ -1,4 +1,4 @@
-@'
+
 // Vercel Serverless Function — 페이앱이 결제 완료를 서버끼리 직접 통보하는 곳입니다.
 const admin = require('firebase-admin');
 
@@ -105,4 +105,4 @@ module.exports = async (req, res) => {
     return res.status(500).send('ERROR');
   }
 };
-'@ | Out-File -Encoding utf8 api\payapp-feedback.js
+
