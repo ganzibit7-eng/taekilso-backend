@@ -1,4 +1,4 @@
-@'
+
 {
   "name": "taekilso-vercel-backend",
   "private": true,
@@ -7,4 +7,4 @@
     "firebase-admin": "^13.0.0"
   }
 }
-'@ | Out-File -Encoding utf8 package.json
+
