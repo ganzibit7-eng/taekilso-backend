@@ -1,8 +1,8 @@
-@'
+
 {
   "functions": {
     "api/payapp-feedback.js": { "runtime": "nodejs20.x" },
     "api/kakao-custom-token.js": { "runtime": "nodejs20.x" }
   }
 }
-'@ | Out-File -Encoding utf8 vercel.json
+
