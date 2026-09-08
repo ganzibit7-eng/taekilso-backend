@@ -1,6 +1,1 @@
-{
-  "functions": {
-    "api/payapp-feedback.js": {},
-    "api/kakao-custom-token.js": {}
-  }
-}
+{}
