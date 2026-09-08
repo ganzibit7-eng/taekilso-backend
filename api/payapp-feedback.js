@@ -4,16 +4,24 @@
  
 const admin = require('firebase-admin');
  
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n')
-    })
-  });
+let db = null;
+let initError = null;
+try {
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n')
+      })
+    });
+  }
+  db = admin.firestore();
+} catch (e) {
+  // 여기서 실패하면(예: 환경변수 형식 문제) 이 함수 전체가 원인도 안 남기고 그냥 죽어버릴 수
+  // 있어서, 에러를 붙잡아뒀다가 아래 handler에서 무슨 문제인지 명확하게 응답합니다.
+  initError = e;
 }
-const db = admin.firestore();
  
 const PAYAPP_USERID = 'green5797';
 const PREMIUM_PRICE = 4900;
@@ -27,12 +35,18 @@ function postValue(body, key) {
 }
  
 module.exports = async (req, res) => {
+  if (initError) {
+    console.error('[payapp-feedback] Firebase 초기화 실패:', initError);
+    return res.status(500).send('INIT_ERROR: ' + initError.message);
+  }
+ 
   const debugId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-  const debugRef = db.collection('debugLogs').doc(debugId);
   let result = 'UNKNOWN';
   let extra = {};
+  let debugRef = null;
  
   try {
+    debugRef = db.collection('debugLogs').doc(debugId);
     // 요청이 들어왔다는 기록은 응답 속도를 늦추지 않도록 기다리지 않고(비동기로) 남깁니다.
     // (페이앱이 응답을 기다리는 시간이 있어서, 여기서 시간을 끌면 "고객사 응답 실패"가 날 수 있습니다)
     debugRef.set({
@@ -129,8 +143,11 @@ module.exports = async (req, res) => {
     return res.status(200).send('SUCCESS');
   } catch (error) {
     result = 'EXCEPTION: ' + (error && error.message);
+    console.error('[payapp-feedback] 예외 발생:', error);
     return res.status(500).send('ERROR');
   } finally {
-    await debugRef.set({ result, extra: JSON.parse(JSON.stringify(extra)) }, { merge: true }).catch(() => {});
+    if (debugRef) {
+      await debugRef.set({ result, extra: JSON.parse(JSON.stringify(extra)) }, { merge: true }).catch(() => {});
+    }
   }
 };
