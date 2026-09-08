@@ -41,26 +41,34 @@ module.exports = async (req, res) => {
     const payState = Number(postValue(body, 'pay_state'));
     const mulNo = postValue(body, 'mul_no');
 
+    // 디버깅용: 페이앱이 실제로 뭘 보냈는지, 어느 검증에서 걸리는지 로그로 남깁니다.
+    console.log('[payapp-feedback] 수신된 원본 body:', JSON.stringify(body));
+    console.log('[payapp-feedback] 파싱값:', { userid, linkval, orderId, goodname, price, payState, mulNo });
+
     // 브라우저를 신뢰하지 않고, 페이앱이 보낸 값을 여기서 직접 검증합니다.
-    if (userid !== PAYAPP_USERID) return res.status(200).send('INVALID_USER');
-    if (!linkval || linkval !== PAYAPP_LINKVAL) return res.status(200).send('INVALID_LINKVAL');
-    if (!orderId || !/^TAK-[A-Z0-9]+-[A-Z0-9]+$/.test(orderId)) return res.status(200).send('INVALID_ORDER');
-    if (price !== PREMIUM_PRICE) return res.status(200).send('INVALID_PRICE');
-    if (goodname !== '택일소 프리미엄 30일 이용권') return res.status(200).send('INVALID_PRODUCT');
+    if (userid !== PAYAPP_USERID) { console.log('[payapp-feedback] INVALID_USER:', userid); return res.status(200).send('INVALID_USER'); }
+    if (!linkval || linkval !== PAYAPP_LINKVAL) { console.log('[payapp-feedback] INVALID_LINKVAL. 받은값:', linkval, '/ 환경변수 설정여부:', !!PAYAPP_LINKVAL); return res.status(200).send('INVALID_LINKVAL'); }
+    if (!orderId || !/^TAK-[A-Z0-9]+-[A-Z0-9]+$/.test(orderId)) { console.log('[payapp-feedback] INVALID_ORDER:', orderId); return res.status(200).send('INVALID_ORDER'); }
+    if (price !== PREMIUM_PRICE) { console.log('[payapp-feedback] INVALID_PRICE:', price); return res.status(200).send('INVALID_PRICE'); }
+    if (goodname !== '택일소 프리미엄 30일 이용권') { console.log('[payapp-feedback] INVALID_PRODUCT:', goodname); return res.status(200).send('INVALID_PRODUCT'); }
 
     const ref = db.collection('paymentOrders').doc(orderId);
     const snap = await ref.get();
-    if (!snap.exists) return res.status(200).send('UNKNOWN_ORDER');
+    if (!snap.exists) { console.log('[payapp-feedback] UNKNOWN_ORDER:', orderId); return res.status(200).send('UNKNOWN_ORDER'); }
     const order = snap.data();
+    console.log('[payapp-feedback] 찾은 주문:', JSON.stringify(order));
 
     if (order.amount !== PREMIUM_PRICE || order.product !== PREMIUM_PRODUCT) {
+      console.log('[payapp-feedback] INVALID_ORDER_DATA. 주문:', JSON.stringify(order));
       return res.status(200).send('INVALID_ORDER_DATA');
     }
 
     if (order.status === 'paid' && order.mul_no === mulNo) {
+      console.log('[payapp-feedback] 이미 처리된 주문(중복 통보):', orderId);
       return res.status(200).send('SUCCESS');
     }
 
+    console.log('[payapp-feedback] pay_state:', payState, payState === 4 ? '→ 프리미엄 지급 시도' : '→ 완료 상태 아님, 지급 안함');
     if (payState === 4) {
       await db.runTransaction(async (tx) => {
         const latest = await tx.get(ref);
