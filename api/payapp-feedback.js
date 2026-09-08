@@ -8,13 +8,14 @@ let db = null;
 let initError = null;
 try {
   if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n')
-      })
-    });
+    // 서비스 계정 JSON 파일 전체를 그대로 하나의 환경변수(FIREBASE_SERVICE_ACCOUNT_JSON)로
+    // 등록하는 방식입니다. Private Key를 따로 떼어내 붙여넣으면 줄바꿈이 깨지기 쉬운데,
+    // JSON.parse()는 이스케이프된 개행(\n)을 항상 정확하게 처리해주기 때문에 이 문제 자체가
+    // 생기지 않습니다.
+    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON 환경변수가 비어있습니다.');
+    const serviceAccount = JSON.parse(raw);
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
   }
   db = admin.firestore();
 } catch (e) {
