@@ -1,7 +1,9 @@
-
 // Vercel Serverless Function — 페이앱이 결제 완료를 서버끼리 직접 통보하는 곳입니다.
+// Vercel 대시보드의 Runtime Logs가 잘 안 보이는 경우가 많아서(알려진 문제),
+// 무슨 일이 있었는지 Firestore의 debugLogs 컬렉션에 직접 기록해서 확실하게 확인할 수 있게 합니다.
+ 
 const admin = require('firebase-admin');
-
+ 
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
@@ -12,22 +14,35 @@ if (!admin.apps.length) {
   });
 }
 const db = admin.firestore();
-
+ 
 const PAYAPP_USERID = 'green5797';
 const PREMIUM_PRICE = 4900;
 const PREMIUM_PRODUCT = 'taekilso_premium_30days';
 const PREMIUM_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const PAYAPP_LINKVAL = process.env.PAYAPP_LINKVAL;
-
+ 
 function postValue(body, key) {
   const value = body && body[key];
   return value == null ? '' : String(value).trim();
 }
-
+ 
 module.exports = async (req, res) => {
+  const debugId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const debugRef = db.collection('debugLogs').doc(debugId);
+  let result = 'UNKNOWN';
+  let extra = {};
+ 
   try {
-    if (req.method !== 'POST') return res.status(405).send('METHOD_NOT_ALLOWED');
-
+    // 무엇이 됐든, 요청이 들어왔다는 사실 자체를 가장 먼저 기록합니다.
+    await debugRef.set({
+      receivedAt: admin.firestore.FieldValue.serverTimestamp(),
+      method: req.method,
+      body: req.body || null,
+      hasLinkvalEnv: !!PAYAPP_LINKVAL
+    }).catch(() => {});
+ 
+    if (req.method !== 'POST') { result = 'METHOD_NOT_ALLOWED'; return res.status(405).send(result); }
+ 
     const body = req.body || {};
     const userid = postValue(body, 'userid');
     const linkval = postValue(body, 'linkval');
@@ -36,38 +51,42 @@ module.exports = async (req, res) => {
     const price = Number(postValue(body, 'price'));
     const payState = Number(postValue(body, 'pay_state'));
     const mulNo = postValue(body, 'mul_no');
-
-    if (userid !== PAYAPP_USERID) return res.status(200).send('INVALID_USER');
-    if (!linkval || linkval !== PAYAPP_LINKVAL) return res.status(200).send('INVALID_LINKVAL');
-    if (!orderId || !/^TAK-[A-Z0-9]+-[A-Z0-9]+$/.test(orderId)) return res.status(200).send('INVALID_ORDER');
-    if (price !== PREMIUM_PRICE) return res.status(200).send('INVALID_PRICE');
-    if (goodname !== '택일소 프리미엄 30일 이용권') return res.status(200).send('INVALID_PRODUCT');
-
+    extra = { userid, linkval, orderId, goodname, price, payState, mulNo };
+ 
+    if (userid !== PAYAPP_USERID) { result = 'INVALID_USER'; return res.status(200).send(result); }
+    if (!linkval || linkval !== PAYAPP_LINKVAL) { result = 'INVALID_LINKVAL'; return res.status(200).send(result); }
+    if (!orderId || !/^TAK-[A-Z0-9]+-[A-Z0-9]+$/.test(orderId)) { result = 'INVALID_ORDER'; return res.status(200).send(result); }
+    if (price !== PREMIUM_PRICE) { result = 'INVALID_PRICE'; return res.status(200).send(result); }
+    if (goodname !== '택일소 프리미엄 30일 이용권') { result = 'INVALID_PRODUCT'; return res.status(200).send(result); }
+ 
     const ref = db.collection('paymentOrders').doc(orderId);
     const snap = await ref.get();
-    if (!snap.exists) return res.status(200).send('UNKNOWN_ORDER');
+    if (!snap.exists) { result = 'UNKNOWN_ORDER'; return res.status(200).send(result); }
     const order = snap.data();
-
+    extra.order = order;
+ 
     if (order.amount !== PREMIUM_PRICE || order.product !== PREMIUM_PRODUCT) {
-      return res.status(200).send('INVALID_ORDER_DATA');
+      result = 'INVALID_ORDER_DATA';
+      return res.status(200).send(result);
     }
-
+ 
     if (order.status === 'paid' && order.mul_no === mulNo) {
+      result = 'SUCCESS_ALREADY_PAID';
       return res.status(200).send('SUCCESS');
     }
-
+ 
     if (payState === 4) {
       await db.runTransaction(async (tx) => {
         const latest = await tx.get(ref);
         if (!latest.exists) throw new Error('ORDER_NOT_FOUND');
         const latestOrder = latest.data();
-
+ 
         if (latestOrder.status === 'paid') return;
         if (latestOrder.status !== 'pending') throw new Error('ORDER_NOT_PENDING');
         if (latestOrder.amount !== PREMIUM_PRICE || latestOrder.product !== PREMIUM_PRODUCT) {
           throw new Error('ORDER_MISMATCH');
         }
-
+ 
         const userRef = db.collection('users').doc(latestOrder.uid);
         tx.set(userRef, {
           premium: true,
@@ -77,7 +96,12 @@ module.exports = async (req, res) => {
           lastVerificationMethod: 'server-verified',
           premiumMulNo: mulNo || null
         }, { merge: true });
-
+ 
+        const statsRef = db.collection('stats').doc('counters');
+        tx.set(statsRef, {
+          purchases: admin.firestore.FieldValue.increment(1)
+        }, { merge: true });
+ 
         tx.update(ref, {
           status: 'paid',
           mul_no: mulNo || null,
@@ -87,10 +111,11 @@ module.exports = async (req, res) => {
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
       });
-
+ 
+      result = 'SUCCESS_GRANTED';
       return res.status(200).send('SUCCESS');
     }
-
+ 
     if ([8, 32, 9, 64, 70, 71, 10, 1].includes(payState)) {
       await ref.set({
         lastPayState: payState,
@@ -98,11 +123,13 @@ module.exports = async (req, res) => {
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     }
-
+ 
+    result = 'SUCCESS_NOT_PAID_STATE';
     return res.status(200).send('SUCCESS');
   } catch (error) {
-    console.error('PayApp feedback error:', error);
+    result = 'EXCEPTION: ' + (error && error.message);
     return res.status(500).send('ERROR');
+  } finally {
+    await debugRef.set({ result, extra: JSON.parse(JSON.stringify(extra)) }, { merge: true }).catch(() => {});
   }
 };
-
