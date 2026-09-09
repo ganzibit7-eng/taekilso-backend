@@ -25,7 +25,7 @@ try {
 }
  
 const PAYAPP_USERID = 'green5797';
-const PREMIUM_PRICE = 4900;
+const PREMIUM_PRICE = 29900;
 const PREMIUM_PRODUCT = 'taekilso_premium_30days';
 const PREMIUM_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const PAYAPP_LINKVAL = process.env.PAYAPP_LINKVAL;
