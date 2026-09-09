@@ -31,7 +31,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
  
 // 사용량 제한
 const FREE_TURN_LIMIT = 3;
-const PREMIUM_DAILY_LIMIT = 30;
+const PREMIUM_DAILY_LIMIT = 20;
  
 // 비용 및 컨텍스트 관리를 위해 최근 대화만 전달
 const MAX_HISTORY_MESSAGES = 12;
