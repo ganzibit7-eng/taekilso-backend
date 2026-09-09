@@ -53,6 +53,24 @@ const PRODUCTS = {
       }, { merge: true });
     }
   },
+  ai_gunghap: {
+    price: 7900,
+    goodname: 'AI 궁합·연애 분석',
+    grant: (tx, userRef) => {
+      tx.set(userRef, {
+        purchasedReports: admin.firestore.FieldValue.arrayUnion('ai_gunghap')
+      }, { merge: true });
+    }
+  },
+  ai_jaemul: {
+    price: 5900,
+    goodname: 'AI 재물·직업 분석',
+    grant: (tx, userRef) => {
+      tx.set(userRef, {
+        purchasedReports: admin.firestore.FieldValue.arrayUnion('ai_jaemul')
+      }, { merge: true });
+    }
+  },
   ai_question_pack_5: {
     price: 1900, // 정가 2,900원 → 할인가 1,900원 (판매 문구/할인 표시는 클라이언트에서 처리)
     goodname: 'AI 질문권 5개',
