@@ -52,6 +52,20 @@ const PRODUCTS = {
         purchasedReports: admin.firestore.FieldValue.arrayUnion('ai_jeongmil_saju')
       }, { merge: true });
     }
+  },
+  ai_question_pack_5: {
+    price: 1900, // 정가 2,900원 → 할인가 1,900원 (판매 문구/할인 표시는 클라이언트에서 처리)
+    goodname: 'AI 질문권 5개',
+    grant: (tx, userRef) => {
+      tx.set(userRef, { aiQuestionCredits: admin.firestore.FieldValue.increment(5) }, { merge: true });
+    }
+  },
+  ai_question_pack_10: {
+    price: 3200, // 정가 4,900원 → 할인가 3,200원
+    goodname: 'AI 질문권 10개',
+    grant: (tx, userRef) => {
+      tx.set(userRef, { aiQuestionCredits: admin.firestore.FieldValue.increment(10) }, { merge: true });
+    }
   }
 };
  
