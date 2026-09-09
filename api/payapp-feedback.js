@@ -25,10 +25,35 @@ try {
 }
  
 const PAYAPP_USERID = 'green5797';
-const PREMIUM_PRICE = 29900;
-const PREMIUM_PRODUCT = 'taekilso_premium_30days';
 const PREMIUM_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const PAYAPP_LINKVAL = process.env.PAYAPP_LINKVAL;
+ 
+// 판매하는 모든 상품을 여기 한 곳에 등록합니다. 새 상품이 추가될 때마다 이 목록에만
+// 추가하면 되고, 아래 검증/지급 로직은 상품과 상관없이 공통으로 동작합니다.
+const PRODUCTS = {
+  taekilso_premium_30days: {
+    price: 29900,
+    goodname: '택일소 프리미엄 30일 이용권',
+    // 구독형: 30일간 이용권 + 이용 횟수 초기화
+    grant: (tx, userRef) => {
+      tx.set(userRef, {
+        premium: true,
+        premiumUntil: Date.now() + PREMIUM_DURATION_MS,
+        premiumUsageCount: 0
+      }, { merge: true });
+    }
+  },
+  ai_jeongmil_saju: {
+    price: 4900,
+    goodname: 'AI 정밀사주 리포트',
+    // 1회 구매형: 이 리포트를 영구적으로 열람할 수 있게 해줍니다(기간 제한 없음).
+    grant: (tx, userRef) => {
+      tx.set(userRef, {
+        purchasedReports: admin.firestore.FieldValue.arrayUnion('ai_jeongmil_saju')
+      }, { merge: true });
+    }
+  }
+};
  
 function postValue(body, key) {
   const value = body && body[key];
@@ -72,8 +97,6 @@ module.exports = async (req, res) => {
     if (userid !== PAYAPP_USERID) { result = 'INVALID_USER'; return res.status(200).send(result); }
     if (!linkval || linkval !== PAYAPP_LINKVAL) { result = 'INVALID_LINKVAL'; return res.status(200).send(result); }
     if (!orderId || !/^TAK-[A-Z0-9]+-[A-Z0-9]+$/.test(orderId)) { result = 'INVALID_ORDER'; return res.status(200).send(result); }
-    if (price !== PREMIUM_PRICE) { result = 'INVALID_PRICE'; return res.status(200).send(result); }
-    if (goodname !== '택일소 프리미엄 30일 이용권') { result = 'INVALID_PRODUCT'; return res.status(200).send(result); }
  
     const ref = db.collection('paymentOrders').doc(orderId);
     const snap = await ref.get();
@@ -81,7 +104,11 @@ module.exports = async (req, res) => {
     const order = snap.data();
     extra.order = order;
  
-    if (order.amount !== PREMIUM_PRICE || order.product !== PREMIUM_PRODUCT) {
+    const product = PRODUCTS[order.product];
+    if (!product) { result = 'UNKNOWN_PRODUCT'; return res.status(200).send(result); }
+    if (price !== product.price) { result = 'INVALID_PRICE'; return res.status(200).send(result); }
+    if (goodname !== product.goodname) { result = 'INVALID_PRODUCT_NAME'; return res.status(200).send(result); }
+    if (order.amount !== product.price) {
       result = 'INVALID_ORDER_DATA';
       return res.status(200).send(result);
     }
@@ -99,23 +126,17 @@ module.exports = async (req, res) => {
  
         if (latestOrder.status === 'paid') return;
         if (latestOrder.status !== 'pending') throw new Error('ORDER_NOT_PENDING');
-        if (latestOrder.amount !== PREMIUM_PRICE || latestOrder.product !== PREMIUM_PRODUCT) {
+        if (latestOrder.amount !== product.price || latestOrder.product !== order.product) {
           throw new Error('ORDER_MISMATCH');
         }
  
         const userRef = db.collection('users').doc(latestOrder.uid);
+        product.grant(tx, userRef);
         tx.set(userRef, {
-          premium: true,
-          premiumUntil: Date.now() + PREMIUM_DURATION_MS,
           lastOrderId: orderId,
           lastPurchaseAt: Date.now(),
           lastVerificationMethod: 'server-verified',
-          premiumMulNo: mulNo || null,
-          // 새 결제 주기가 시작될 때마다 이용 횟수를 0으로 되돌립니다. 이 값은 서버(관리자
-          // 지급 포함)만 초기화할 수 있고, 손님 쪽에서는 늘리는 것만(그것도 한 번에 1씩만)
-          // 가능하도록 Firestore 규칙으로 막아둬서, 환불 요청 시 실제 이용 여부를 믿을 수
-          // 있게 합니다.
-          premiumUsageCount: 0
+          lastMulNoGranted: mulNo || null
         }, { merge: true });
  
         const statsRef = db.collection('stats').doc('counters');
