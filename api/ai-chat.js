@@ -62,8 +62,14 @@ module.exports = async (req, res) => {
     }
  
     const userRef = db.collection('users').doc(uid);
-    const userSnap = await userRef.get();
-    if (!userSnap.exists) return res.status(404).json({ error: 'USER_NOT_FOUND' });
+    let userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      // 카카오로 로그인한 손님은 프리미엄을 한 번도 구매한 적이 없으면 이 문서 자체가
+      // 아직 없을 수 있습니다(카카오 로그인 시 별도로 문서를 만들지 않기 때문). 이 경우
+      // 그냥 거부하지 않고, 신규 무료 회원으로 보고 문서를 새로 만들어서 계속 진행합니다.
+      await userRef.set({ premium: false, aiFreeUsed: 0, createdAt: Date.now() }, { merge: true });
+      userSnap = await userRef.get();
+    }
     const userData = userSnap.data();
  
     const isPremiumNow = !!userData.premium && (userData.premiumUntil || 0) > Date.now();
