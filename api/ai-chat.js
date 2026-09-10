@@ -141,6 +141,10 @@ const SYSTEM_PROMPT_BASE = `
 - 필요하면 짧은 소제목과 불릿을 쓰되 표는 되도록 쓰지 마세요.
 - 질문에 답하기 위해 꼭 필요한 정보가 빠진 경우에만 확인 질문을 하나 하세요. 없어도 답할 수 있으면 먼저 답하고 끝에서 선택적으로 추가 질문을 제안하세요.
 - 사용자가 "쉽게", "짧게", "자세히" 같은 형식을 요구하면 그 요구를 우선하세요.
+- 답변은 반드시 문장이 완결된 상태로 끝내세요.
+- 출력 분량이 부족할 것 같으면 항목 수나 설명을 줄이더라도 문장 중간, 따옴표 중간, 목록 항목 중간에서 끝내지 마세요.
+- 핵심 결론과 현실적인 조언까지 전달한 뒤 자연스럽게 마무리하세요.
+- Markdown 구분선이나 목록 앞에 불필요한 역슬래시(\\)를 붙이지 마세요.
 
 [말투]
 한국어 존댓말을 사용합니다.
@@ -572,8 +576,8 @@ module.exports = async (req, res) => {
             // 환경변수를 지정하지 않으면 기존 모델을 그대로 사용합니다.
             model: ANTHROPIC_MODEL,
 
-            // 두 사람 궁합/근거 설명이 중간에 잘리지 않도록 약간 여유를 둡니다.
-            max_tokens: 1000,
+            // 장문 상담도 문장 중간에서 잘리지 않도록 여유를 둡니다. 실제 과금은 생성된 출력 토큰 기준입니다.
+            max_tokens: 1600,
             temperature: 0.45,
 
             system: systemPrompt,
@@ -629,20 +633,87 @@ module.exports = async (req, res) => {
       throw parseError;
     }
  
-    const replyText =
+    let replyText =
       (data.content || [])
-        .filter(
-          block => block.type === 'text'
-        )
-        .map(
-          block => block.text
-        )
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
         .join('\n')
-        .trim()
-      ||
-      '죄송해요, 답변을 만드는 데 문제가 있었어요. 다시 시도해주세요.';
- 
- 
+        .trim();
+
+    const firstStopReason = String(data.stop_reason || '');
+
+    // 출력 한도에 실제로 걸렸을 때만 한 번 이어서 생성합니다.
+    // 정상 종료(end_turn 등)에는 추가 Anthropic 호출이 없습니다.
+    if (firstStopReason === 'max_tokens' && replyText) {
+      const continuationController = new AbortController();
+      const continuationTimeoutId = setTimeout(() => continuationController.abort(), ANTHROPIC_TIMEOUT_MS);
+
+      try {
+        const continuationMessages = [
+          ...messages,
+          { role: 'assistant', content: replyText },
+          {
+            role: 'user',
+            content:
+              '방금 답변이 출력 한도 때문에 중간에서 끊겼습니다. ' +
+              '이미 쓴 내용을 반복하지 말고 끊긴 부분부터 자연스럽게 이어서 마무리하세요. ' +
+              '새로운 근거나 제공되지 않은 명리 정보를 만들지 말고, 남은 핵심 조언만 간결하게 완결하세요.'
+          }
+        ];
+
+        const continuationRes = await fetch(
+          'https://api.anthropic.com/v1/messages',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': ANTHROPIC_API_KEY,
+              'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+              model: ANTHROPIC_MODEL,
+              max_tokens: 700,
+              temperature: 0.35,
+              system: systemPrompt,
+              messages: continuationMessages
+            }),
+            signal: continuationController.signal
+          }
+        );
+
+        if (continuationRes.ok) {
+          const continuationData = await continuationRes.json();
+          const continuationText = (continuationData.content || [])
+            .filter(block => block.type === 'text')
+            .map(block => block.text)
+            .join('\n')
+            .trim();
+
+          if (continuationText) {
+            replyText = `${replyText}\n${continuationText}`.trim();
+          }
+        } else {
+          const continuationError = await continuationRes.text().catch(() => '');
+          console.warn('[ai-chat] 잘린 답변 이어쓰기 실패:', continuationRes.status, continuationError);
+        }
+      } catch (continuationError) {
+        console.warn('[ai-chat] 잘린 답변 이어쓰기 예외:', continuationError && continuationError.message);
+      } finally {
+        clearTimeout(continuationTimeoutId);
+      }
+    }
+
+    if (!replyText) {
+      replyText = '죄송해요, 답변을 만드는 데 문제가 있었어요. 다시 시도해주세요.';
+    }
+
+    // 모델이 Markdown 문법을 이스케이프해서 보낸 경우 \---, 1\.처럼
+    // 노출되지 않도록 안전한 범위에서만 정리합니다.
+    replyText = replyText
+      .replace(/\\([#*_~`>\-])/g, '$1')
+      .replace(/(^|\n)(\s*\d+)\\\.(\s+)/g, '$1$2.$3');
+
+
     // ========================================================
     // 응답
     // ========================================================
@@ -653,6 +724,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({
  
       reply: replyText,
+      stopReason: firstStopReason,
  
       freeUsed: usageReservation.freeUsed,
 
