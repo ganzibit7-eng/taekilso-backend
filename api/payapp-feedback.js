@@ -32,7 +32,7 @@ const PAYAPP_LINKVAL = process.env.PAYAPP_LINKVAL;
 // 추가하면 되고, 아래 검증/지급 로직은 상품과 상관없이 공통으로 동작합니다.
 const PRODUCTS = {
   taekilso_premium_30days: {
-    price: 29900,
+    price: 19900,
     goodname: '택일소 프리미엄 30일 이용권',
     // 구독형: 30일간 이용권 + 이용 횟수 초기화
     grant: (tx, userRef) => {
@@ -40,34 +40,6 @@ const PRODUCTS = {
         premium: true,
         premiumUntil: Date.now() + PREMIUM_DURATION_MS,
         premiumUsageCount: 0
-      }, { merge: true });
-    }
-  },
-  ai_jeongmil_saju: {
-    price: 4900,
-    goodname: 'AI 정밀사주 리포트',
-    // 1회 구매형: 이 리포트를 영구적으로 열람할 수 있게 해줍니다(기간 제한 없음).
-    grant: (tx, userRef) => {
-      tx.set(userRef, {
-        purchasedReports: admin.firestore.FieldValue.arrayUnion('ai_jeongmil_saju')
-      }, { merge: true });
-    }
-  },
-  ai_gunghap: {
-    price: 7900,
-    goodname: 'AI 궁합·연애 분석',
-    grant: (tx, userRef) => {
-      tx.set(userRef, {
-        purchasedReports: admin.firestore.FieldValue.arrayUnion('ai_gunghap')
-      }, { merge: true });
-    }
-  },
-  ai_jaemul: {
-    price: 5900,
-    goodname: 'AI 재물·직업 분석',
-    grant: (tx, userRef) => {
-      tx.set(userRef, {
-        purchasedReports: admin.firestore.FieldValue.arrayUnion('ai_jaemul')
       }, { merge: true });
     }
   },
@@ -173,7 +145,11 @@ module.exports = async (req, res) => {
  
         const statsRef = db.collection('stats').doc('counters');
         tx.set(statsRef, {
-          purchases: admin.firestore.FieldValue.increment(1)
+          purchases: admin.firestore.FieldValue.increment(1),
+          // 상품마다 가격이 달라서(프리미엄 19,900원 vs 질문권 1,900원 등), 매출은
+          // "구매 건수 × 고정 가격"으로 추정하지 않고 실제 결제 금액을 그대로 더합니다.
+          revenue: admin.firestore.FieldValue.increment(product.price),
+          [`purchasesByProduct.${order.product}`]: admin.firestore.FieldValue.increment(1)
         }, { merge: true });
  
         tx.update(ref, {
