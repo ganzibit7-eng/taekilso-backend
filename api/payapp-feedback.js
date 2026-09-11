@@ -35,10 +35,14 @@ const PRODUCTS = {
     price: 19900,
     goodname: '택일소 프리미엄 30일 이용권',
     // 구독형: 30일간 이용권 + 이용 횟수 초기화
-    grant: (tx, userRef) => {
+    grant: (tx, userRef, context = {}) => {
+      const now = context.now || Date.now();
+      const currentUntil = Number(context.currentPremiumUntil || 0);
+      // 이용 중 재구매한 경우 남아 있던 기간 뒤에 30일을 이어 붙입니다.
+      const base = currentUntil > now ? currentUntil : now;
       tx.set(userRef, {
         premium: true,
-        premiumUntil: Date.now() + PREMIUM_DURATION_MS,
+        premiumUntil: base + PREMIUM_DURATION_MS,
         premiumUsageCount: 0
       }, { merge: true });
     }
@@ -64,10 +68,22 @@ function postValue(body, key) {
   return value == null ? '' : String(value).trim();
 }
 
+function toMillisSafe(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return value;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 module.exports = async (req, res) => {
   if (initError) {
     console.error('[payapp-feedback] Firebase 초기화 실패:', initError);
     return res.status(500).send('INIT_ERROR: ' + initError.message);
+  }
+  if (!PAYAPP_LINKVAL) {
+    console.error('[payapp-feedback] PAYAPP_LINKVAL 환경변수가 비어있습니다.');
+    return res.status(500).send('MISSING_PAYAPP_LINKVAL');
   }
 
   const debugId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -79,10 +95,22 @@ module.exports = async (req, res) => {
     debugRef = db.collection('debugLogs').doc(debugId);
     // 요청이 들어왔다는 기록은 응답 속도를 늦추지 않도록 기다리지 않고(비동기로) 남깁니다.
     // (페이앱이 응답을 기다리는 시간이 있어서, 여기서 시간을 끌면 "고객사 응답 실패"가 날 수 있습니다)
+    // 디버그 로그에는 결제 처리에 필요한 최소 필드만 남깁니다.
+    // PayApp 원문 body 전체를 저장하면 휴대폰 번호 등 불필요한 개인정보가 로그에 남을 수 있습니다.
+    const debugBody = req.body ? {
+      userid: postValue(req.body, 'userid'),
+      var1: postValue(req.body, 'var1'),
+      goodname: postValue(req.body, 'goodname'),
+      price: postValue(req.body, 'price'),
+      pay_state: postValue(req.body, 'pay_state'),
+      mul_no: postValue(req.body, 'mul_no'),
+      pay_type: postValue(req.body, 'pay_type'),
+      pay_date: postValue(req.body, 'pay_date')
+    } : null;
     debugRef.set({
       receivedAt: admin.firestore.FieldValue.serverTimestamp(),
       method: req.method,
-      body: req.body || null,
+      body: debugBody,
       hasLinkvalEnv: !!PAYAPP_LINKVAL
     }).catch(() => {});
 
@@ -106,7 +134,7 @@ module.exports = async (req, res) => {
     const snap = await ref.get();
     if (!snap.exists) { result = 'UNKNOWN_ORDER'; return res.status(200).send(result); }
     const order = snap.data();
-    extra.order = order;
+    extra.order = { product: order.product, amount: order.amount, status: order.status, uid: order.uid ? '[present]' : '[missing]' };
 
     const product = PRODUCTS[order.product];
     if (!product) { result = 'UNKNOWN_PRODUCT'; return res.status(200).send(result); }
@@ -135,10 +163,16 @@ module.exports = async (req, res) => {
         }
 
         const userRef = db.collection('users').doc(latestOrder.uid);
-        product.grant(tx, userRef);
+        const userSnap = await tx.get(userRef);
+        const currentUser = userSnap.exists ? (userSnap.data() || {}) : {};
+        const now = Date.now();
+        product.grant(tx, userRef, {
+          now,
+          currentPremiumUntil: toMillisSafe(currentUser.premiumUntil)
+        });
         tx.set(userRef, {
           lastOrderId: orderId,
-          lastPurchaseAt: Date.now(),
+          lastPurchaseAt: now,
           lastVerificationMethod: 'server-verified',
           lastMulNoGranted: mulNo || null
         }, { merge: true });

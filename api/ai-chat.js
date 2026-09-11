@@ -73,6 +73,11 @@ const SYSTEM_PROMPT_BASE = `
 
 [해석 품질 원칙]
 - 명리학 용어를 나열하고 끝내지 말고 반드시 일상적인 의미로 번역하세요.
+- 십신 하나, 오행 하나, 특정 일주 하나만으로 성격·재물·결혼·성공·실패를 단정하지 마세요. 예: "겁재가 있으니 돈이 샌다", "편재가 많으니 큰돈을 번다"처럼 단일 요소를 사건과 바로 연결하지 않습니다.
+- 현재 데이터에는 신강·신약, 월령의 세력 판단, 통근·투간, 합충형파해, 격국·용신, 대운·세운이 계산되어 있지 않을 수 있습니다. 이런 구조 판단값이 제공되지 않았다면 그 개념을 전제로 결론 내리지 마세요.
+- 십신의 개수나 반복만 세어 "재성이 많다/관성이 강하다"고 결론내리지 마세요. 세력·위치·계절·생극 관계를 계산한 데이터가 없으면 "표면적으로 이런 요소가 보인다" 수준으로만 말하세요.
+- 천간 십신, 지지 십신, 지장간은 서로 같은 층위의 정보가 아닙니다. 지지/지장간에 나온 십신을 천간에 드러난 것처럼 표현하지 마세요.
+- 재물·직업·연애 해석에서는 가능한 경우 서로 다른 근거 2개 이상이 같은 방향을 가리킬 때만 비교적 강한 표현을 쓰고, 근거가 하나뿐이면 가능성/성향 수준으로 낮춰 표현하세요.
 - "목 기운이 강하다"처럼 한 문장으로 끝내지 말고, 어떤 상황에서 강점/부담으로 나타날 수 있는지 설명하세요.
 - 일반적인 칭찬이나 누구에게나 맞는 문장을 피하세요. 중요한 해석에는 가능한 한 바로 앞이나 뒤에 근거가 되는 사주 요소를 붙이세요.
 - 장점과 주의점을 균형 있게 말하되 억지로 50:50으로 맞추지는 마세요.
@@ -133,6 +138,18 @@ const SYSTEM_PROMPT_BASE = `
 사주 관점의 성향과 고려 요소는 설명할 수 있지만 전문적인 결정을 대신하지 마세요.
 현실 조건, 계약 내용, 재무 상황 등 실제 정보를 함께 확인하도록 안내하세요.
 
+[답변을 제한해야 하는 질문]
+다음 질문은 사주로 결론을 내려서는 안 됩니다. 사용자의 불안을 키우지 말고, 짧게 한계를 밝힌 뒤 안전한 대안만 안내하세요.
+- 본인이나 타인의 사망 시점, 수명, 요절, 치명적 사고 예언
+- 암·질병·정신질환 등 의학적 진단이나 발병 여부 예언
+- 임신 성공 여부·임신 시기 확정, 유산 여부, 태아 성별을 사주로 단정
+- 로또·도박 당첨번호나 당첨 시점 예측
+- 특정 주식·코인·부동산의 매수/매도 종목·시점·수익을 사주로 지시
+- 소송 승패·형사처벌 여부 등 법적 결과를 사주로 확정
+- 특정 사람이 범죄자, 불륜을 할 사람, 폭력적일 사람이라고 낙인찍는 예언
+- 자해·자살 여부나 시점을 사주로 예언
+이 경우에도 "나쁜 사주라서 그렇다" 같은 표현은 절대 사용하지 마세요.
+
 [답변 방식]
 - 먼저 사용자가 가장 궁금해한 결론을 1~2문장으로 답하세요.
 - 이어서 핵심 사주 근거 1~3개를 설명하세요.
@@ -141,6 +158,10 @@ const SYSTEM_PROMPT_BASE = `
 - 필요하면 짧은 소제목과 불릿을 쓰되 표는 되도록 쓰지 마세요.
 - 질문에 답하기 위해 꼭 필요한 정보가 빠진 경우에만 확인 질문을 하나 하세요. 없어도 답할 수 있으면 먼저 답하고 끝에서 선택적으로 추가 질문을 제안하세요.
 - 사용자가 "쉽게", "짧게", "자세히" 같은 형식을 요구하면 그 요구를 우선하세요.
+- 답변은 반드시 문장이 완결된 상태로 끝내세요.
+- 출력 분량이 부족할 것 같으면 항목 수나 설명을 줄이더라도 문장 중간, 따옴표 중간, 목록 항목 중간에서 끝내지 마세요.
+- 핵심 결론과 현실적인 조언까지 전달한 뒤 자연스럽게 마무리하세요.
+- Markdown 구분선이나 목록 앞에 불필요한 역슬래시(\\)를 붙이지 마세요.
 
 [말투]
 한국어 존댓말을 사용합니다.
@@ -150,6 +171,60 @@ const SYSTEM_PROMPT_BASE = `
 같은 시작 문구나 같은 결론 표현을 반복하지 말고 손님의 질문에 맞춰 자연스럽게 답하세요.
 `;
  
+
+function getRestrictedFortuneResponse(message) {
+  const text = String(message || '').trim();
+  const compact = text.replace(/\s+/g, ' ');
+
+  // 사주로 답을 만들면 실제 위해가 생기기 쉬운 질문은 Claude 호출 전에 제한합니다.
+  const rules = [
+    {
+      code: 'LIFESPAN_DEATH',
+      re: /(언제\s*죽|몇\s*살까지\s*살|수명(이|은|을|이야|얼마)|요절|죽을\s*운|사망\s*(시기|운|날짜)|큰\s*사고로\s*죽)/i,
+      reply: '수명이나 사망 시점, 치명적인 사고 여부는 사주로 판단하거나 예언해드리지 않아요. 대신 현재 사주 데이터 안에서 생활 리듬이나 스트레스를 관리할 때 참고할 성향 정도는 안전하게 봐드릴 수 있어요.'
+    },
+    {
+      code: 'MEDICAL_DIAGNOSIS',
+      re: /(암(에)?\s*(걸|생길|있을)|무슨\s*병|질병(에)?\s*(걸|생길|있을)|치매(에)?\s*(걸|올)|정신병(에)?\s*(걸|있)|병에\s*걸|건강검진\s*결과|수술\s*(해야|할까))/i,
+      reply: '질병의 유무나 발병 시점, 진단·치료 판단은 사주로 답하지 않아요. 건강운을 묻는다면 사주에서 보이는 생활 리듬이나 스트레스 관리 성향 정도만 참고로 설명할 수 있고, 실제 증상은 의료진의 확인이 필요해요.'
+    },
+    {
+      code: 'PREGNANCY_MEDICAL',
+      re: /(언제\s*임신|임신\s*(될까|되나|가능|성공)|유산\s*(할까|하나|운)|태아\s*성별|아들\s*(일까|낳)|딸\s*(일까|낳))/i,
+      reply: '임신 가능 여부·시기, 유산 여부나 태아 성별은 사주로 확정해서 말씀드리지 않아요. 자녀에 대한 관계 성향이나 가족생활에서 참고할 점은 볼 수 있지만, 임신과 관련된 실제 판단은 의학적 확인이 가장 중요해요.'
+    },
+    {
+      code: 'GAMBLING_LOTTERY',
+      re: /(로또|복권|연금복권|카지노|도박).*(번호|당첨|언제|날짜|살까|베팅)|당첨\s*번호/i,
+      reply: '로또·복권·도박의 당첨번호나 당첨 시점은 사주로 예측해드리지 않아요. 재물운은 돈을 벌고 관리할 때 나타날 수 있는 성향과 위험관리 관점으로는 봐드릴 수 있어요.'
+    },
+    {
+      code: 'SPECIFIC_INVESTMENT',
+      re: /((주식|코인|비트코인|부동산|ETF|종목).*(뭘|무엇|어떤|사야|살까|매수|매도|팔까|몰빵|전재산|수익)|(매수|매도)\s*(시점|타이밍))/i,
+      reply: '특정 종목이나 코인·부동산의 매수·매도 시점과 수익을 사주로 지시해드리지는 않아요. 대신 재물운 관점에서 위험을 감수하는 성향, 소비·관리 습관, 의사결정 때 주의할 점은 설명해드릴 수 있어요.'
+    },
+    {
+      code: 'LEGAL_OUTCOME',
+      re: /(소송|재판|고소|형사|구속|징역).*(이길|질까|승소|패소|구속|감옥|징역|결과)/i,
+      reply: '소송의 승패나 처벌 여부 같은 법적 결과는 사주로 확정해서 말씀드리지 않아요. 사주 관점에서 갈등 상황에서의 의사결정 성향을 참고로 볼 수는 있지만, 실제 판단은 사건 자료와 법률 전문가의 검토가 필요해요.'
+    },
+    {
+      code: 'CRIME_STIGMA',
+      re: /(범죄자|살인|폭력범|성범죄|사기꾼|바람둥이|불륜).*(사주|될까|인가|할까|하나)/i,
+      reply: '사주만으로 특정 사람이 범죄를 저지를 사람인지, 불륜이나 폭력을 할 사람인지 낙인찍어 판단하지 않아요. 관계에서 실제로 관찰되는 행동과 경계해야 할 신호를 기준으로 판단하는 편이 더 안전해요.'
+    },
+    {
+      code: 'SELF_HARM',
+      re: /(죽고\s*싶|자살|극단적\s*선택|나를\s*해치|자해)/i,
+      reply: '그 질문을 사주로 예언하거나 판단하지 않을게요. 지금 스스로를 해칠 생각이 있거나 당장 위험하다고 느껴진다면 혼자 버티지 말고 가까운 사람이나 지역의 응급·위기지원에 바로 도움을 요청해주세요. 원하시면 지금 상황을 안전하게 정리하는 대화는 함께할 수 있어요.'
+    }
+  ];
+
+  for (const rule of rules) {
+    if (rule.re.test(compact)) return { restricted: true, code: rule.code, reply: rule.reply };
+  }
+  return { restricted: false };
+}
 
 function usageError(code, message) {
   const err = new Error(message || code);
@@ -177,14 +252,12 @@ async function reserveUsageAtomic(uid) {
       if (count >= PREMIUM_DAILY_LIMIT) {
         throw usageError('DAILY_LIMIT_REACHED', '오늘 상담 가능 횟수를 모두 사용하셨어요. 내일 다시 이용해주세요.');
       }
-
       tx.set(dailyRef, {
         count: admin.firestore.FieldValue.increment(1),
         uid,
         date: todayKey,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
-
       return {
         kind: 'premium',
         todayKey,
@@ -203,7 +276,6 @@ async function reserveUsageAtomic(uid) {
       tx.set(userRef, {
         aiFreeUsed: admin.firestore.FieldValue.increment(1)
       }, { merge: true });
-
       return {
         kind: 'free',
         isPremiumNow: false,
@@ -218,7 +290,6 @@ async function reserveUsageAtomic(uid) {
       tx.set(userRef, {
         aiQuestionCredits: admin.firestore.FieldValue.increment(-1)
       }, { merge: true });
-
       return {
         kind: 'credit',
         isPremiumNow: false,
@@ -242,48 +313,31 @@ async function rollbackUsageReservation(uid, reservation) {
   try {
     if (reservation.kind === 'premium') {
       const dailyRef = db.collection('aiDailyUsage').doc(`${uid}_${reservation.todayKey}`);
-
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(dailyRef);
-
         if (!snap.exists) return;
-
         const count = Math.max(0, Number(snap.data().count || 0) - 1);
-
         tx.set(dailyRef, {
           count,
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
       });
-
       return;
     }
 
     const userRef = db.collection('users').doc(uid);
-
     if (reservation.kind === 'free') {
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(userRef);
-
         if (!snap.exists) return;
-
         const current = Number((snap.data() || {}).aiFreeUsed || 0);
-
-        tx.set(
-          userRef,
-          {
-            aiFreeUsed: Math.max(0, current - 1)
-          },
-          { merge: true }
-        );
+        tx.set(userRef, { aiFreeUsed: Math.max(0, current - 1) }, { merge: true });
       });
-
     } else if (reservation.kind === 'credit') {
       await userRef.set({
         aiQuestionCredits: admin.firestore.FieldValue.increment(1)
       }, { merge: true });
     }
-
   } catch (rollbackError) {
     // 답변 생성 실패보다 rollback 실패가 사용자 응답을 가리지 않도록 로그만 남깁니다.
     console.error('[ai-chat] 사용량 rollback 실패:', rollbackError);
@@ -291,6 +345,46 @@ async function rollbackUsageReservation(uid, reservation) {
 }
 
  
+async function authenticateRequest(req) {
+  const authHeader = String(req.headers && req.headers.authorization || '').trim();
+
+  if (authHeader.startsWith('Bearer ')) {
+    const idToken = authHeader.slice(7).trim();
+    if (idToken) {
+      try {
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        if (decoded && decoded.uid) {
+          return { uid: decoded.uid, provider: 'firebase' };
+        }
+      } catch (err) {
+        console.warn('[ai-chat] Firebase ID 토큰 검증 실패:', err && err.message);
+      }
+    }
+  }
+
+  const kakaoToken = String(
+    (req.headers && req.headers['x-kakao-access-token']) || ''
+  ).trim();
+
+  if (kakaoToken) {
+    try {
+      const kakaoRes = await fetch('https://kapi.kakao.com/v2/user/me', {
+        headers: { Authorization: 'Bearer ' + kakaoToken }
+      });
+      if (kakaoRes.ok) {
+        const me = await kakaoRes.json();
+        if (me && me.id) {
+          return { uid: 'kakao_' + String(me.id), provider: 'kakao' };
+        }
+      }
+    } catch (err) {
+      console.warn('[ai-chat] Kakao 토큰 검증 실패:', err && err.message);
+    }
+  }
+
+  return null;
+}
+
 module.exports = async (req, res) => {
  
   // ==========================================================
@@ -299,7 +393,7 @@ module.exports = async (req, res) => {
  
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Kakao-Access-Token');
  
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
@@ -339,7 +433,7 @@ module.exports = async (req, res) => {
     // ========================================================
  
     const {
-      uid,
+      uid: claimedUid,
       sajuSummary,
       sajuProfile,
       subjects,
@@ -353,7 +447,6 @@ module.exports = async (req, res) => {
     // ========================================================
  
     if (
-      !uid ||
       !message ||
       typeof message !== 'string' ||
       !message.trim()
@@ -362,12 +455,37 @@ module.exports = async (req, res) => {
         error: 'INVALID_REQUEST'
       });
     }
+
+    const identity = await authenticateRequest(req);
+    if (!identity || !identity.uid) {
+      return res.status(401).json({
+        error: 'UNAUTHORIZED',
+        message: '로그인 세션을 확인하지 못했어요. 다시 로그인해주세요.'
+      });
+    }
+
+    // body.uid는 호환용 참고값일 뿐입니다. 권한 판단에는 검증된 토큰 UID만 사용합니다.
+    const uid = identity.uid;
+    if (claimedUid && String(claimedUid) !== uid) {
+      console.warn('[ai-chat] client uid mismatch ignored:', String(claimedUid), '=>', uid);
+    }
  
     // 질문 길이 제한
     if (message.length > 500) {
       return res.status(400).json({
         error: 'MESSAGE_TOO_LONG',
         message: '질문은 500자 이내로 적어주세요.'
+      });
+    }
+
+    // 사주로 답하면 안 되는 고위험 질문은 Anthropic 호출/사용량 차감 전에 바로 제한합니다.
+    const restricted = getRestrictedFortuneResponse(message);
+    if (restricted.restricted) {
+      return res.status(200).json({
+        reply: restricted.reply,
+        restricted: true,
+        restrictedCode: restricted.code,
+        usageCharged: false
       });
     }
  
@@ -406,12 +524,9 @@ module.exports = async (req, res) => {
     // ========================================================
 
     let usageReservation;
-
     try {
       usageReservation = await reserveUsageAtomic(uid);
-
     } catch (usageErr) {
-
       if (usageErr && usageErr.code === 'DAILY_LIMIT_REACHED') {
         return res.status(403).json({
           error: 'DAILY_LIMIT_REACHED',
@@ -419,7 +534,6 @@ module.exports = async (req, res) => {
           premiumDailyLimit: PREMIUM_DAILY_LIMIT
         });
       }
-
       if (usageErr && usageErr.code === 'FREE_LIMIT_REACHED') {
         return res.status(403).json({
           error: 'FREE_LIMIT_REACHED',
@@ -428,7 +542,6 @@ module.exports = async (req, res) => {
           questionCredits: Number(userData.aiQuestionCredits || 0)
         });
       }
-
       throw usageErr;
     }
 
@@ -460,9 +573,7 @@ module.exports = async (req, res) => {
     // 기존 프론트는 현재 질문을 history에도 먼저 넣어서 보낼 수 있습니다.
     // 마지막 user 메시지가 현재 질문과 같으면 한 번 제거해 Claude에 중복 전달되지 않게 합니다.
     const currentMessage = message.trim();
-
     const lastHistoryMessage = messages[messages.length - 1];
-
     if (
       lastHistoryMessage &&
       lastHistoryMessage.role === 'user' &&
@@ -487,61 +598,30 @@ module.exports = async (req, res) => {
           name: String(subject && subject.name || `인물 ${index + 1}`).slice(0, 30),
           relation: String(subject && subject.relation || '').slice(0, 30),
           summary: String(subject && subject.summary || '').slice(0, 1800),
-          structuredData:
-            subject && subject.data
-              ? JSON.stringify(subject.data).slice(0, 1400)
-              : ''
-        }))
-        .filter(
-          subject =>
-            subject.summary ||
-            subject.structuredData
-        )
+          structuredData: subject && subject.data ? JSON.stringify(subject.data).slice(0, 1400) : ''
+        })).filter((subject) => subject.summary || subject.structuredData)
       : [];
 
     let sajuContext = '';
 
     if (safeSubjects.length > 0) {
-
-      sajuContext =
-        '\n\n[상담 대상 사주 데이터]\n' +
-        safeSubjects.map(
-          (subject, index) =>
-            `\n### ${index + 1}. ${subject.name}${
-              subject.relation
-                ? ` (${subject.relation})`
-                : ''
-            }\n${subject.summary}${
-              subject.structuredData
-                ? `\n[구조화 계산 데이터] ${subject.structuredData}`
-                : ''
-            }`
-        ).join('\n');
+      sajuContext = '\n\n[상담 대상 사주 데이터]\n' + safeSubjects.map((subject, index) =>
+        `\n### ${index + 1}. ${subject.name}${subject.relation ? ` (${subject.relation})` : ''}\n${subject.summary}${subject.structuredData ? `\n[구조화 계산 데이터] ${subject.structuredData}` : ''}`
+      ).join('\n');
 
       if (safeSubjects.length > 1) {
-        sajuContext += `
-
-[다중 인물 상담 원칙]
+        sajuContext += `\n\n[다중 인물 상담 원칙]
 각 인물의 데이터를 서로 섞지 마세요.
 궁합·연애·가족·동업 질문에서는 두 사람을 따로 설명한 뒤 끝내지 말고, 실제 상호작용과 관계 패턴을 중심으로 설명하세요.
 제공된 데이터만 근거로 사용하고, 제공되지 않은 합충·대운·세운·특정 날짜를 만들어내지 마세요.`;
       }
-
     } else if (sajuSummary) {
-
-      // 구버전 index.html과 완전 호환:
-      // 기존 sajuSummary 요청도 그대로 지원합니다.
-      sajuContext =
-        `\n\n[손님의 사주 데이터]\n${String(sajuSummary).slice(0, 1800)}`;
-
+      // 구버전 index.html과 완전 호환: 기존 sajuSummary 요청도 그대로 지원합니다.
+      sajuContext = `\n\n[손님의 사주 데이터]\n${String(sajuSummary).slice(0, 1800)}`;
     } else if (sajuProfile) {
-
       // sajuSummary가 없고 구조화 프로필만 넘어온 예외적인 경우를 위한 보조 정보입니다.
-      sajuContext =
-        `\n\n[손님의 입력 프로필]\n${JSON.stringify(sajuProfile).slice(0, 1200)}`;
-
+      sajuContext = `\n\n[손님의 입력 프로필]\n${JSON.stringify(sajuProfile).slice(0, 1200)}`;
     } else {
-
       sajuContext = `
 
 [손님의 사주 데이터 없음]
@@ -551,38 +631,7 @@ module.exports = async (req, res) => {
 `;
     }
 
-    const conversionGuidance =
-      usageReservation.kind === 'free' &&
-      usageReservation.freeUsed === 1
-
-        ? `
-
-[첫 무료 상담 응답 원칙]
-이 손님의 첫 무료 질문입니다.
-짧게 맛보기만 주지 말고 신뢰가 생길 만큼 충분히 답하세요.
-가능하면 '핵심 해석 → 왜 그렇게 보는지 → 현실에서 나타나는 모습 → 시기/흐름(제공된 계산 근거가 있을 때만) → 현실적인 조언' 순서로 구성하세요.
-다만 제공되지 않은 운세 계산값은 만들지 마세요.`
-
-        : usageReservation.kind === 'free' &&
-          usageReservation.freeUsed === 3
-
-          ? `
-
-[세 번째 무료 상담 응답 원칙]
-이 손님의 세 번째 무료 질문입니다.
-마지막 무료 질문이라는 이유로 답을 줄이거나 결제를 권하지 말고, 질문 자체에는 끝까지 충분히 답하세요.`
-
-          : '';
-
-    const systemPrompt =
-      SYSTEM_PROMPT_BASE +
-      `
-
-[현재 기준]
-대한민국 표준시(Asia/Seoul) 날짜: ${getKstDateKey()}
-현재 날짜는 달력 기준 안내에만 사용하고, 세운·월운 등 명리 계산값을 현재 날짜만으로 만들어내지 마세요.` +
-      conversionGuidance +
-      sajuContext;
+    const systemPrompt = SYSTEM_PROMPT_BASE + `\n\n[현재 기준] 대한민국 표준시(Asia/Seoul) 날짜: ${getKstDateKey()}\n현재 날짜는 달력 기준 안내에만 사용하고, 세운·월운 등 명리 계산값을 현재 날짜만으로 만들어내지 마세요.` + sajuContext;
  
  
     // ========================================================
@@ -590,67 +639,42 @@ module.exports = async (req, res) => {
     // ========================================================
  
     const controller = new AbortController();
-
-    const timeoutId =
-      setTimeout(
-        () => controller.abort(),
-        ANTHROPIC_TIMEOUT_MS
-      );
-
+    const timeoutId = setTimeout(() => controller.abort(), ANTHROPIC_TIMEOUT_MS);
     let anthropicRes;
-
     try {
-
-      anthropicRes =
-        await fetch(
-          'https://api.anthropic.com/v1/messages',
-          {
-            method: 'POST',
+      anthropicRes = await fetch(
+        'https://api.anthropic.com/v1/messages',
+        {
+          method: 'POST',
  
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': ANTHROPIC_API_KEY,
-              'anthropic-version': '2023-06-01'
-            },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01'
+          },
  
-            body: JSON.stringify({
+          body: JSON.stringify({
  
-              // 환경변수를 지정하지 않으면 기존 모델을 그대로 사용합니다.
-              model: ANTHROPIC_MODEL,
+            // 환경변수를 지정하지 않으면 기존 모델을 그대로 사용합니다.
+            model: ANTHROPIC_MODEL,
 
-              // 두 사람 궁합/근거 설명이 중간에 잘리지 않도록 약간 여유를 둡니다.
-              max_tokens: 1000,
+            // 장문 상담도 문장 중간에서 잘리지 않도록 여유를 둡니다. 실제 과금은 생성된 출력 토큰 기준입니다.
+            max_tokens: 1600,
+            temperature: 0.45,
 
-              temperature: 0.45,
+            system: systemPrompt,
 
-              system: systemPrompt,
-
-              messages
-            }),
-
-            signal: controller.signal
-          }
-        );
-
-    } catch (fetchError) {
-
-      await rollbackUsageReservation(
-        uid,
-        usageReservation
+            messages
+          }),
+          signal: controller.signal
+        }
       );
-
-      if (
-        fetchError &&
-        fetchError.name === 'AbortError'
-      ) {
-        return res.status(504).json({
-          error: 'AI_TIMEOUT',
-          message: '답변 생성 시간이 길어졌어요. 다시 한 번 질문해주세요.'
-        });
+    } catch (fetchError) {
+      await rollbackUsageReservation(uid, usageReservation);
+      if (fetchError && fetchError.name === 'AbortError') {
+        return res.status(504).json({ error: 'AI_TIMEOUT', message: '답변 생성 시간이 길어졌어요. 다시 한 번 질문해주세요.' });
       }
-
       throw fetchError;
-
     } finally {
       clearTimeout(timeoutId);
     }
@@ -661,7 +685,9 @@ module.exports = async (req, res) => {
     // ========================================================
  
     if (!anthropicRes.ok) {
- 
+
+      await rollbackUsageReservation(uid, usageReservation);
+
       const errText =
         await anthropicRes.text().catch(() => '');
  
@@ -682,34 +708,94 @@ module.exports = async (req, res) => {
     // ========================================================
  
     let data;
-
     try {
       data = await anthropicRes.json();
-
     } catch (parseError) {
-
-      await rollbackUsageReservation(
-        uid,
-        usageReservation
-      );
-
+      await rollbackUsageReservation(uid, usageReservation);
       throw parseError;
     }
  
-    const replyText =
+    let replyText =
       (data.content || [])
-        .filter(
-          block => block.type === 'text'
-        )
-        .map(
-          block => block.text
-        )
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
         .join('\n')
-        .trim()
-      ||
-      '죄송해요, 답변을 만드는 데 문제가 있었어요. 다시 시도해주세요.';
- 
- 
+        .trim();
+
+    const firstStopReason = String(data.stop_reason || '');
+
+    // 출력 한도에 실제로 걸렸을 때만 한 번 이어서 생성합니다.
+    // 정상 종료(end_turn 등)에는 추가 Anthropic 호출이 없습니다.
+    if (firstStopReason === 'max_tokens' && replyText) {
+      const continuationController = new AbortController();
+      const continuationTimeoutId = setTimeout(() => continuationController.abort(), ANTHROPIC_TIMEOUT_MS);
+
+      try {
+        const continuationMessages = [
+          ...messages,
+          { role: 'assistant', content: replyText },
+          {
+            role: 'user',
+            content:
+              '방금 답변이 출력 한도 때문에 중간에서 끊겼습니다. ' +
+              '이미 쓴 내용을 반복하지 말고 끊긴 부분부터 자연스럽게 이어서 마무리하세요. ' +
+              '새로운 근거나 제공되지 않은 명리 정보를 만들지 말고, 남은 핵심 조언만 간결하게 완결하세요.'
+          }
+        ];
+
+        const continuationRes = await fetch(
+          'https://api.anthropic.com/v1/messages',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': ANTHROPIC_API_KEY,
+              'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+              model: ANTHROPIC_MODEL,
+              max_tokens: 700,
+              temperature: 0.35,
+              system: systemPrompt,
+              messages: continuationMessages
+            }),
+            signal: continuationController.signal
+          }
+        );
+
+        if (continuationRes.ok) {
+          const continuationData = await continuationRes.json();
+          const continuationText = (continuationData.content || [])
+            .filter(block => block.type === 'text')
+            .map(block => block.text)
+            .join('\n')
+            .trim();
+
+          if (continuationText) {
+            replyText = `${replyText}\n${continuationText}`.trim();
+          }
+        } else {
+          const continuationError = await continuationRes.text().catch(() => '');
+          console.warn('[ai-chat] 잘린 답변 이어쓰기 실패:', continuationRes.status, continuationError);
+        }
+      } catch (continuationError) {
+        console.warn('[ai-chat] 잘린 답변 이어쓰기 예외:', continuationError && continuationError.message);
+      } finally {
+        clearTimeout(continuationTimeoutId);
+      }
+    }
+
+    if (!replyText) {
+      replyText = '죄송해요, 답변을 만드는 데 문제가 있었어요. 다시 시도해주세요.';
+    }
+
+    // 모델이 Markdown 문법을 이스케이프해서 보낸 경우 \---, 1\.처럼
+    // 노출되지 않도록 안전한 범위에서만 정리합니다.
+    replyText = replyText
+      .replace(/\\([#*_~`>\-])/g, '$1')
+      .replace(/(^|\n)(\s*\d+)\\\.(\s+)/g, '$1$2.$3');
+
+
     // ========================================================
     // 응답
     // ========================================================
@@ -720,27 +806,20 @@ module.exports = async (req, res) => {
     return res.status(200).json({
  
       reply: replyText,
+      stopReason: firstStopReason,
  
       freeUsed: usageReservation.freeUsed,
 
       freeLimit: FREE_TURN_LIMIT,
 
       premiumDailyLimit: PREMIUM_DAILY_LIMIT,
-
       premiumPrice: 19900,
-
       premiumDays: 30,
+      premiumDailyUsed: usageReservation.dailyUsed == null ? null : usageReservation.dailyUsed,
 
-      premiumDailyUsed:
-        usageReservation.dailyUsed == null
-          ? null
-          : usageReservation.dailyUsed,
+      usingCredit: usageReservation.usingCredit,
 
-      usingCredit:
-        usageReservation.usingCredit,
-
-      questionCreditsLeft:
-        usageReservation.questionCreditsLeft
+      questionCreditsLeft: usageReservation.questionCreditsLeft
     });
  
  
