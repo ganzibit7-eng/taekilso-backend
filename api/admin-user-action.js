@@ -1,17 +1,35 @@
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 
 let db = null;
 let initError = null;
 
-const API_VERSION = '2026-09-credit-revoke-v2';
+const API_VERSION = '2026-09-delete-password-v3';
 
 const ADMIN_EMAILS = new Set([
   'green092432@gmail.com'
 ]);
 
+function safeSecretEqual(input, expected) {
+  const a = Buffer.from(String(input || ''), 'utf8');
+  const b = Buffer.from(String(expected || ''), 'utf8');
+
+  if (!a.length || !b.length || a.length !== b.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(a, b);
+}
+
+
+/* =========================
+   Firebase Admin 초기화
+========================= */
+
 try {
   if (!admin.apps.length) {
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    const raw =
+      process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
     if (!raw) {
       throw new Error(
@@ -27,6 +45,7 @@ try {
   }
 
   db = admin.firestore();
+
 } catch (err) {
   initError = err;
 }
@@ -38,21 +57,26 @@ try {
 
 async function verifyAdmin(req) {
   const authHeader = String(
-    (req.headers && req.headers.authorization) || ''
+    (req.headers &&
+      req.headers.authorization) ||
+      ''
   ).trim();
 
   if (!authHeader.startsWith('Bearer ')) {
     throw new Error('UNAUTHORIZED');
   }
 
-  const token = authHeader.slice(7).trim();
+  const token =
+    authHeader.slice(7).trim();
 
   if (!token) {
     throw new Error('UNAUTHORIZED');
   }
 
   const decoded =
-    await admin.auth().verifyIdToken(token);
+    await admin
+      .auth()
+      .verifyIdToken(token, true);
 
   const email = String(
     decoded.email || ''
@@ -83,7 +107,7 @@ async function writeAudit(
 ) {
   try {
     await db
-      .collection('adminActionLogs')
+      .collection('adminAuditLogs')
       .add({
         actorUid: actor.uid,
         actorEmail: actor.email,
@@ -98,9 +122,8 @@ async function writeAudit(
             .FieldValue
             .serverTimestamp()
       });
+
   } catch (err) {
-    // 로그 저장 실패 때문에 실제 관리자 작업까지
-    // 실패시키지는 않습니다.
     console.error(
       '[admin-user-action] audit log error',
       err
@@ -118,9 +141,10 @@ async function deleteCollection(
   batchSize = 100
 ) {
   while (true) {
-    const snap = await collectionRef
-      .limit(batchSize)
-      .get();
+    const snap =
+      await collectionRef
+        .limit(batchSize)
+        .get();
 
     if (snap.empty) {
       break;
@@ -169,7 +193,9 @@ module.exports = async (req, res) => {
 
 
   if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+    return res
+      .status(204)
+      .end();
   }
 
 
@@ -203,17 +229,18 @@ module.exports = async (req, res) => {
     const actor =
       await verifyAdmin(req);
 
-
     const body =
       req.body || {};
 
-
     const action =
-      String(body.action || '').trim();
-
+      String(
+        body.action || ''
+      ).trim();
 
     const uid =
-      String(body.uid || '').trim();
+      String(
+        body.uid || ''
+      ).trim();
 
 
     if (!action) {
@@ -242,21 +269,19 @@ module.exports = async (req, res) => {
     if (action === 'grant_premium') {
 
       const userRef =
-        db.collection('users').doc(uid);
-
+        db
+          .collection('users')
+          .doc(uid);
 
       const snap =
         await userRef.get();
-
 
       const data =
         snap.exists
           ? (snap.data() || {})
           : {};
 
-
       let currentUntil = 0;
-
 
       if (
         data.premiumUntil &&
@@ -265,22 +290,23 @@ module.exports = async (req, res) => {
       ) {
         currentUntil =
           data.premiumUntil.toMillis();
+
       } else {
         currentUntil =
-          Number(data.premiumUntil || 0);
+          Number(
+            data.premiumUntil || 0
+          );
       }
 
+      const now =
+        Date.now();
 
-      const now = Date.now();
-
-
-      // 이미 프리미엄 기간이 남아 있다면
-      // 현재 만료일 뒤에 30일 추가
+      // 기존 프리미엄 기간이 남아 있으면
+      // 기존 만료일 뒤에 30일을 추가합니다.
       const base =
         currentUntil > now
           ? currentUntil
           : now;
-
 
       const until =
         base +
@@ -291,9 +317,11 @@ module.exports = async (req, res) => {
         {
           premium: true,
 
-          premiumUntil: until,
+          premiumUntil:
+            until,
 
-          grantedByAdmin: true,
+          grantedByAdmin:
+            true,
 
           lastVerificationMethod:
             'admin-grant',
@@ -314,7 +342,8 @@ module.exports = async (req, res) => {
         action,
         uid,
         {
-          premiumUntil: until
+          premiumUntil:
+            until
         }
       );
 
@@ -323,14 +352,15 @@ module.exports = async (req, res) => {
         ok: true,
 
         action,
-
         uid,
 
         premium: true,
 
-        premiumUntil: until,
+        premiumUntil:
+          until,
 
-        apiVersion: API_VERSION
+        apiVersion:
+          API_VERSION
       });
     }
 
@@ -343,14 +373,17 @@ module.exports = async (req, res) => {
     if (action === 'revoke_premium') {
 
       const userRef =
-        db.collection('users').doc(uid);
+        db
+          .collection('users')
+          .doc(uid);
 
 
       await userRef.set(
         {
           premium: false,
 
-          premiumUntil: 0,
+          premiumUntil:
+            0,
 
           lastAdminPremiumRevokeAt:
             admin.firestore
@@ -374,14 +407,15 @@ module.exports = async (req, res) => {
         ok: true,
 
         action,
-
         uid,
 
         premium: false,
 
-        premiumUntil: 0,
+        premiumUntil:
+          0,
 
-        apiVersion: API_VERSION
+        apiVersion:
+          API_VERSION
       });
     }
 
@@ -395,11 +429,14 @@ module.exports = async (req, res) => {
     if (action === 'grant_credits') {
 
       const count =
-        Number(body.count || 0);
+        Number(
+          body.count || 0
+        );
 
 
       if (
-        ![1, 5, 10].includes(count)
+        ![1, 5, 10]
+          .includes(count)
       ) {
         throw new Error(
           'INVALID_CREDIT_COUNT'
@@ -408,7 +445,9 @@ module.exports = async (req, res) => {
 
 
       const ref =
-        db.collection('users').doc(uid);
+        db
+          .collection('users')
+          .doc(uid);
 
 
       let before = 0;
@@ -475,9 +514,7 @@ module.exports = async (req, res) => {
         uid,
         {
           before,
-
           granted: count,
-
           questionCredits:
             after
         }
@@ -488,11 +525,9 @@ module.exports = async (req, res) => {
         ok: true,
 
         action,
-
         uid,
 
         before,
-
         granted: count,
 
         questionCredits:
@@ -517,7 +552,9 @@ module.exports = async (req, res) => {
 
 
       const ref =
-        db.collection('users').doc(uid);
+        db
+          .collection('users')
+          .doc(uid);
 
 
       let before = 0;
@@ -587,7 +624,6 @@ module.exports = async (req, res) => {
               );
 
 
-            // 절대 마이너스가 되지 않음
             after =
               Math.max(
                 0,
@@ -624,9 +660,7 @@ module.exports = async (req, res) => {
         uid,
         {
           before,
-
           revoked,
-
           questionCredits:
             after
         }
@@ -637,11 +671,9 @@ module.exports = async (req, res) => {
         ok: true,
 
         action,
-
         uid,
 
         before,
-
         revoked,
 
         questionCredits:
@@ -658,10 +690,68 @@ module.exports = async (req, res) => {
        회원 강제탈퇴
     ========================= */
 
-    if (action === 'force_delete') {
+    if (
+      action === 'delete_user' ||
+      action === 'force_delete'
+    ) {
+
+      /*
+       * 강제탈퇴는 Firebase 관리자 인증에 더해
+       * Vercel에 저장한 별도 비밀번호를 요구합니다.
+       *
+       * 비밀번호를 이 코드에 직접 적지 마세요.
+       */
+      const expectedDeletePassword =
+        String(
+          process.env
+            .ADMIN_DELETE_PASSWORD ||
+          ''
+        );
+
+
+      if (!expectedDeletePassword) {
+
+        return res.status(503).json({
+          error:
+            'DELETE_PASSWORD_NOT_CONFIGURED',
+
+          message:
+            '강제탈퇴 비밀번호가 서버에 설정되지 않았습니다.'
+        });
+      }
+
+
+      if (
+        !safeSecretEqual(
+          body.deletePassword,
+          expectedDeletePassword
+        )
+      ) {
+
+        await writeAudit(
+          actor,
+          'delete_user_password_failed',
+          uid,
+          {
+            reason:
+              'password_mismatch'
+          }
+        );
+
+
+        return res.status(403).json({
+          error:
+            'DELETE_PASSWORD_INVALID',
+
+          message:
+            '강제탈퇴 비밀번호가 올바르지 않습니다.'
+        });
+      }
+
 
       // 관리자 자기 자신 삭제 방지
       if (uid === actor.uid) {
+
         return res.status(400).json({
           error:
             'CANNOT_DELETE_SELF',
@@ -673,10 +763,14 @@ module.exports = async (req, res) => {
 
 
       const userRef =
-        db.collection('users').doc(uid);
+        db
+          .collection('users')
+          .doc(uid);
 
 
-      // 사주 보관함 삭제
+      /*
+       * 개인정보 성격의 회원 하위 데이터는 삭제
+       */
       await deleteCollection(
         userRef.collection(
           'sajuProfiles'
@@ -684,7 +778,6 @@ module.exports = async (req, res) => {
       );
 
 
-      // AI 상담 기록 삭제
       await deleteCollection(
         userRef.collection(
           'aiConversations'
@@ -696,7 +789,9 @@ module.exports = async (req, res) => {
       await userRef.delete();
 
 
-      // Firebase Authentication 삭제
+      /*
+       * Firebase Authentication 계정 삭제
+       */
       try {
 
         await admin
@@ -705,8 +800,8 @@ module.exports = async (req, res) => {
 
       } catch (err) {
 
-        // Auth 계정이 이미 없어도
-        // Firestore 탈퇴 처리는 완료
+        // Auth 계정이 이미 없는 경우에는
+        // 탈퇴 처리를 실패시키지 않습니다.
         if (
           !err ||
           err.code !==
@@ -717,10 +812,18 @@ module.exports = async (req, res) => {
       }
 
 
+      /*
+       * 결제/문의 기록은 회계·환불·분쟁 확인을 위해
+       * 여기서 삭제하지 않습니다.
+       */
+
       await writeAudit(
         actor,
         action,
-        uid
+        uid,
+        {
+          deleted: true
+        }
       );
 
 
@@ -728,7 +831,6 @@ module.exports = async (req, res) => {
         ok: true,
 
         action,
-
         uid,
 
         deleted: true,
@@ -745,7 +847,8 @@ module.exports = async (req, res) => {
     ========================= */
 
     return res.status(400).json({
-      error: 'UNKNOWN_ACTION',
+      error:
+        'UNKNOWN_ACTION',
 
       message:
         '지원하지 않는 관리자 작업입니다.',
@@ -769,7 +872,8 @@ module.exports = async (req, res) => {
         'UNAUTHORIZED'
     ) {
       return res.status(401).json({
-        error: 'UNAUTHORIZED',
+        error:
+          'UNAUTHORIZED',
 
         message:
           '관리자 로그인이 필요합니다.'
@@ -783,7 +887,8 @@ module.exports = async (req, res) => {
         'FORBIDDEN'
     ) {
       return res.status(403).json({
-        error: 'FORBIDDEN',
+        error:
+          'FORBIDDEN',
 
         message:
           '관리자 계정만 사용할 수 있습니다.'
@@ -797,7 +902,8 @@ module.exports = async (req, res) => {
         'USER_NOT_FOUND'
     ) {
       return res.status(404).json({
-        error: 'USER_NOT_FOUND',
+        error:
+          'USER_NOT_FOUND',
 
         message:
           '회원 정보를 찾지 못했습니다.'
@@ -823,16 +929,24 @@ module.exports = async (req, res) => {
     }
 
 
-    const code =
+    if (
       err &&
       err.code ===
         'auth/id-token-revoked'
-        ? 'TOKEN_REVOKED'
-        : 'SERVER_ERROR';
+    ) {
+      return res.status(401).json({
+        error:
+          'TOKEN_REVOKED',
+
+        message:
+          '관리자 로그인 세션이 만료되었습니다.'
+      });
+    }
 
 
     return res.status(500).json({
-      error: code,
+      error:
+        'SERVER_ERROR',
 
       message:
         '관리자 작업 처리 중 오류가 발생했습니다.',
