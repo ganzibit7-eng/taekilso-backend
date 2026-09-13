@@ -3,6 +3,7 @@
 // 무슨 일이 있었는지 Firestore의 debugLogs 컬렉션에 직접 기록해서 확실하게 확인할 수 있게 합니다.
 
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 
 let db = null;
 let initError = null;
@@ -68,6 +69,13 @@ function postValue(body, key) {
   return value == null ? '' : String(value).trim();
 }
 
+function safeEqual(a, b) {
+  const aa = Buffer.from(String(a || ''), 'utf8');
+  const bb = Buffer.from(String(b || ''), 'utf8');
+  if (!aa.length || aa.length !== bb.length) return false;
+  return crypto.timingSafeEqual(aa, bb);
+}
+
 function toMillisSafe(value) {
   if (!value) return 0;
   if (typeof value === 'number') return value;
@@ -77,9 +85,13 @@ function toMillisSafe(value) {
 }
 
 module.exports = async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+
   if (initError) {
     console.error('[payapp-feedback] Firebase 초기화 실패:', initError);
-    return res.status(500).send('INIT_ERROR: ' + initError.message);
+    return res.status(500).send('INIT_ERROR');
   }
   if (!PAYAPP_LINKVAL) {
     console.error('[payapp-feedback] PAYAPP_LINKVAL 환경변수가 비어있습니다.');
@@ -124,10 +136,10 @@ module.exports = async (req, res) => {
     const price = Number(postValue(body, 'price'));
     const payState = Number(postValue(body, 'pay_state'));
     const mulNo = postValue(body, 'mul_no');
-    extra = { userid, linkval, orderId, goodname, price, payState, mulNo };
+    extra = { userid, linkvalPresent: !!linkval, orderId, goodname, price, payState, mulNo };
 
     if (userid !== PAYAPP_USERID) { result = 'INVALID_USER'; return res.status(200).send(result); }
-    if (!linkval || linkval !== PAYAPP_LINKVAL) { result = 'INVALID_LINKVAL'; return res.status(200).send(result); }
+    if (!safeEqual(linkval, PAYAPP_LINKVAL)) { result = 'INVALID_LINKVAL'; return res.status(200).send(result); }
     if (!orderId || !/^TAK-[A-Z0-9]+-[A-Z0-9]+$/.test(orderId)) { result = 'INVALID_ORDER'; return res.status(200).send(result); }
 
     const ref = db.collection('paymentOrders').doc(orderId);

@@ -1,6 +1,43 @@
 const admin = require('firebase-admin');
 const crypto = require('crypto');
 
+const DEFAULT_ALLOWED_ORIGINS = new Set([
+  'https://taekilso.com',
+  'https://www.taekilso.com'
+]);
+
+function getAllowedOrigins() {
+  const set = new Set(DEFAULT_ALLOWED_ORIGINS);
+  String(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean)
+    .forEach(v => set.add(v));
+  if (process.env.NODE_ENV !== 'production') {
+    set.add('http://localhost:3000');
+    set.add('http://127.0.0.1:3000');
+    set.add('http://localhost:5500');
+    set.add('http://127.0.0.1:5500');
+  }
+  return set;
+}
+
+function applySecurityHeaders(req, res, allowedHeaders) {
+  const origin = String((req.headers && req.headers.origin) || '').trim();
+  const allowed = getAllowedOrigins();
+  if (origin && allowed.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', allowedHeaders || 'Content-Type, Authorization');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  return !origin || allowed.has(origin);
+}
+
+
 let db = null;
 let initError = null;
 
@@ -63,20 +100,22 @@ async function getCooldown(ids){
 }
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Cache-Control', 'no-store');
-
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  const originAllowed = applySecurityHeaders(req, res, 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return originAllowed ? res.status(204).end() : res.status(403).end();
+  }
+  if (!originAllowed) return res.status(403).json({ error:'ORIGIN_NOT_ALLOWED' });
   if (req.method !== 'POST') return res.status(405).json({ error:'METHOD_NOT_ALLOWED' });
-  if (initError || !db) return res.status(500).json({ error:'INIT_ERROR', message:initError ? initError.message : 'Firebase init failed' });
+  if (initError || !db) return res.status(500).json({ error:'INIT_ERROR' });
 
   try {
     const header = String((req.headers && req.headers.authorization) || '').trim();
-    if (!header.startsWith('Bearer ')) return res.status(401).json({ error:'UNAUTHORIZED' });
+    if (!header.startsWith('Bearer ') || header.length > 8192) {
+      return res.status(401).json({ error:'UNAUTHORIZED' });
+    }
 
-    const decoded = await admin.auth().verifyIdToken(header.slice(7).trim());
+    // 민감한 계정 상태 확인은 폐기(revoked)된 토큰도 거부합니다.
+    const decoded = await admin.auth().verifyIdToken(header.slice(7).trim(), true);
     if (!decoded || !decoded.uid) return res.status(401).json({ error:'UNAUTHORIZED' });
 
     const ids = await identifiers(decoded.uid, decoded);

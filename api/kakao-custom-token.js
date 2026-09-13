@@ -3,6 +3,43 @@
 
 const admin = require('firebase-admin');
 
+const DEFAULT_ALLOWED_ORIGINS = new Set([
+  'https://taekilso.com',
+  'https://www.taekilso.com'
+]);
+
+function getAllowedOrigins() {
+  const set = new Set(DEFAULT_ALLOWED_ORIGINS);
+  String(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean)
+    .forEach(v => set.add(v));
+  if (process.env.NODE_ENV !== 'production') {
+    set.add('http://localhost:3000');
+    set.add('http://127.0.0.1:3000');
+    set.add('http://localhost:5500');
+    set.add('http://127.0.0.1:5500');
+  }
+  return set;
+}
+
+function applySecurityHeaders(req, res, allowedHeaders) {
+  const origin = String((req.headers && req.headers.origin) || '').trim();
+  const allowed = getAllowedOrigins();
+  if (origin && allowed.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', allowedHeaders || 'Content-Type, Authorization');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  return !origin || allowed.has(origin);
+}
+
+
 let initError = null;
 
 try {
@@ -26,13 +63,12 @@ const KAKAO_ME_URL = 'https://kapi.kakao.com/v2/user/me';
 const KAKAO_TIMEOUT_MS = 10000;
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Cache-Control', 'no-store');
-
+  const originAllowed = applySecurityHeaders(req, res, 'Content-Type');
   if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+    return originAllowed ? res.status(204).end() : res.status(403).end();
+  }
+  if (!originAllowed) {
+    return res.status(403).json({ error:'ORIGIN_NOT_ALLOWED' });
   }
 
   if (initError) {
