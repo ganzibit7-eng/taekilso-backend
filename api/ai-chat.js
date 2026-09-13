@@ -33,7 +33,7 @@ const ANTHROPIC_TIMEOUT_MS = 25000;
  
 // 사용량 제한
 const FREE_TURN_LIMIT = 3;
-const PREMIUM_DAILY_LIMIT = 20;
+const PREMIUM_DAILY_LIMIT = 15;
 
 // 관리자 계정은 Firebase가 검증한 로그인 토큰의 이메일로만 판별합니다.
 // 클라이언트가 보내는 email/uid 값은 관리자 판별에 사용하지 않습니다.
@@ -274,7 +274,7 @@ function usageError(code, message) {
 }
 
 // Claude를 호출하기 전에 사용량을 transaction으로 "예약"합니다.
-// 이렇게 해야 동시에 여러 요청을 보내도 무료 3회 / 프리미엄 하루 20회를 넘지 않습니다.
+// 이렇게 해야 동시에 여러 요청을 보내도 무료 3회 / 프리미엄 하루 15회를 넘지 않습니다.
 // AI 호출이 실패하거나 타임아웃되면 rollbackUsageReservation()에서 예약을 되돌립니다.
 async function reserveUsageAtomic(uid, isAdminUser = false) {
   const userRef = db.collection('users').doc(uid);
@@ -896,7 +896,7 @@ module.exports = async (req, res) => {
       freeLimit: FREE_TURN_LIMIT,
 
       premiumDailyLimit: usageReservation.dailyLimit || (usageReservation.isAdmin ? ADMIN_DAILY_LIMIT : PREMIUM_DAILY_LIMIT),
-      premiumPrice: 19900,
+      premiumPrice: 8900,
       premiumDays: 30,
       premiumDailyUsed: usageReservation.dailyUsed == null ? null : usageReservation.dailyUsed,
       isAdmin: !!usageReservation.isAdmin,

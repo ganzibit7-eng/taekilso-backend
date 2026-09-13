@@ -32,7 +32,7 @@ const PAYAPP_LINKVAL = process.env.PAYAPP_LINKVAL;
 // 추가하면 되고, 아래 검증/지급 로직은 상품과 상관없이 공통으로 동작합니다.
 const PRODUCTS = {
   taekilso_premium_30days: {
-    price: 19900,
+    price: 8900,
     goodname: '택일소 프리미엄 30일 이용권',
     // 구독형: 30일간 이용권 + 이용 횟수 초기화
     grant: (tx, userRef, context = {}) => {
@@ -180,7 +180,7 @@ module.exports = async (req, res) => {
         const statsRef = db.collection('stats').doc('counters');
         tx.set(statsRef, {
           purchases: admin.firestore.FieldValue.increment(1),
-          // 상품마다 가격이 달라서(프리미엄 19,900원 vs 질문권 1,900원 등), 매출은
+          // 상품마다 가격이 달라서(프리미엄 8,900원 vs 질문권 1,900원 등), 매출은
           // "구매 건수 × 고정 가격"으로 추정하지 않고 실제 결제 금액을 그대로 더합니다.
           revenue: admin.firestore.FieldValue.increment(product.price),
           [`purchasesByProduct.${order.product}`]: admin.firestore.FieldValue.increment(1)
