@@ -70,7 +70,7 @@ test('free 3 is lifetime, credits and premium expiry are preserved',async()=>{
   assert.equal(next.kind,'credit'); assert.equal(next.freeUsed,3);
   assert.equal(f.read('users/a').premiumUntil,999);
 });
-test('premium timestamp and daily cap, administrator cap, no entitlement',async()=>{
+test('premium daily cap, administrator cap, no entitlement',async()=>{
   const premium=fixture({'users/a':{premium:true,premiumUntil:99999,aiFreeUsed:3},'aiDailyUsage/a_2026-11-10':{count:15}});
   await assert.rejects(premium.ledger.reserve('a',false,'request-00000001','one'),{code:'DAILY_LIMIT_REACHED'});
   const admin=fixture({'aiDailyUsage/a_2026-11-10':{count:100}});
@@ -90,7 +90,7 @@ function handlerFixture({upstream, identity={uid:'a',email:'member@example.com',
   function firestore(){return f.db;}
   firestore.FieldValue={serverTimestamp:()=>123};
   const admin={apps:[{}],firestore,auth:()=>({verifyIdToken:async()=>identity})};
-  const sandbox={module:{exports:{}},require:name=>name==='firebase-admin'?admin:name==='../lib/ai-usage'?createLedger:require(name),process:{env:{ANTHROPIC_API_KEY:'test',FIREBASE_SERVICE_ACCOUNT_JSON:'test-secret'}},console:{error(){},warn(){}},setTimeout,clearTimeout,AbortController,Buffer,fetch:async()=>{calls++; if(upstream instanceof Error)throw upstream; return upstream || {ok:true,json:async()=>({content:[{type:'text',text:'상담 답변'}],stop_reason:'end_turn',usage:{input_tokens:10,output_tokens:5}})};}};
+  const sandbox={module:{exports:{}},require:name=>name==='firebase-admin'?admin:name==='../lib/ai-usage'?createLedger:require(name),process:{env:{ANTHROPIC_API_KEY:'test',FIREBASE_SERVICE_ACCOUNT_JSON:'test-secret'}},console:{error(){},warn(){}},setTimeout,clearTimeout,AbortController,Buffer,fetch:async()=>{calls++; if(upstream instanceof Error)throw upstream; if(typeof upstream==='function')return upstream(calls); return upstream || {ok:true,json:async()=>({content:[{type:'text',text:'상담 답변'}],stop_reason:'end_turn',usage:{input_tokens:10,output_tokens:5}})};}};
   vm.runInNewContext(fs.readFileSync(require.resolve('../api/ai-chat.js'),'utf8'),sandbox);
   async function invoke(overrides={}) {
     const req={method:'POST',headers:{authorization:'Bearer test'},body:{requestId:'request-00000001',message:'업무 방식이 궁금해요',history:[],...overrides}};
@@ -121,4 +121,14 @@ for(const [name,upstream] of [
 test('restricted questions never call AI or consume entitlement',async()=>{
   const f=handlerFixture();const r=await f.invoke({message:'로또 당첨 번호 알려줘'});
   assert.equal(r.body.usageCharged,false);assert.equal(f.calls(),0);assert.equal(f.read('users/a').aiFreeUsed,0);
+});
+test('claimed UID cannot spend another account entitlement',async()=>{
+  const f=handlerFixture();const r=await f.invoke({uid:'victim'});assert.equal(r.status,200);
+  assert.equal(f.read('users/a').aiFreeUsed,1);assert.equal(f.read('users/victim'),undefined);
+});
+test('continuation tokens are counted and replay never regenerates either call',async()=>{
+  const f=handlerFixture({upstream:async call=>({ok:true,json:async()=>({content:[{type:'text',text:call===1?'첫 문장.':'마지막 문장.'}],stop_reason:call===1?'max_tokens':'end_turn',usage:{input_tokens:10,output_tokens:5}})})});
+  const r=await f.invoke();assert.equal(r.status,200);assert.equal(r.body.reply,'첫 문장.\n마지막 문장.');
+  assert.equal(r.body.tokenUsage.input,20);assert.equal(r.body.tokenUsage.output,10);assert.equal(f.calls(),2);
+  await f.invoke();assert.equal(f.calls(),2);assert.equal(f.read('users/a').aiFreeUsed,1);
 });

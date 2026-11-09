@@ -269,12 +269,6 @@ function getRestrictedFortuneResponse(message) {
   return { restricted: false };
 }
 
-function usageError(code, message) {
-  const err = new Error(message || code);
-  err.code = code;
-  return err;
-}
-
 // Claude를 호출하기 전에 사용량을 transaction으로 "예약"합니다.
 // 이렇게 해야 동시에 여러 요청을 보내도 무료 3회 / 프리미엄 하루 15회를 넘지 않습니다.
 // AI 호출이 실패하거나 타임아웃되면 rollbackUsageReservation()에서 예약을 되돌립니다.
@@ -466,14 +460,14 @@ module.exports = async (req, res) => {
       if (usageErr && usageErr.code === 'DAILY_LIMIT_REACHED') {
         return res.status(403).json({
           error: 'DAILY_LIMIT_REACHED',
-          message: usageErr.message,
+          message: '오늘 상담 가능 횟수를 모두 사용하셨어요. 내일 다시 이용해주세요.',
           premiumDailyLimit: isAdminUser ? ADMIN_DAILY_LIMIT : PREMIUM_DAILY_LIMIT
         });
       }
       if (usageErr && usageErr.code === 'FREE_LIMIT_REACHED') {
         return res.status(403).json({
           error: 'FREE_LIMIT_REACHED',
-          message: usageErr.message,
+          message: '무료 답변 3회를 모두 사용하셨어요. 질문권이나 프리미엄으로 상담을 이어갈 수 있어요.',
           freeLimit: FREE_TURN_LIMIT,
           questionCredits: Number(userData.aiQuestionCredits || 0)
         });
@@ -715,7 +709,7 @@ module.exports = async (req, res) => {
           }
         } else {
           const continuationError = await continuationRes.text().catch(() => '');
-          console.warn('[ai-chat] 잘린 답변 이어쓰기 실패:', continuationRes.status, continuationError);
+          console.warn('[ai-chat] 잘린 답변 이어쓰기 실패:', continuationRes.status);
         }
       } catch (continuationError) {
         console.warn('[ai-chat] 잘린 답변 이어쓰기 예외:', continuationError && continuationError.message);
