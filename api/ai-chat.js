@@ -2,6 +2,8 @@
 // 무료 3턴 / 프리미엄 일일 상한은 서버에서 강제합니다.
  
 const admin = require('firebase-admin');
+const crypto = require('node:crypto');
+const createUsageLedger = require('../lib/ai-usage');
  
 let db = null;
 let initError = null;
@@ -267,160 +269,17 @@ function getRestrictedFortuneResponse(message) {
   return { restricted: false };
 }
 
-function usageError(code, message) {
-  const err = new Error(message || code);
-  err.code = code;
-  return err;
-}
-
 // Claude를 호출하기 전에 사용량을 transaction으로 "예약"합니다.
 // 이렇게 해야 동시에 여러 요청을 보내도 무료 3회 / 프리미엄 하루 15회를 넘지 않습니다.
 // AI 호출이 실패하거나 타임아웃되면 rollbackUsageReservation()에서 예약을 되돌립니다.
-async function reserveUsageAtomic(uid, isAdminUser = false) {
-  const userRef = db.collection('users').doc(uid);
-  const todayKey = getKstDateKey();
-  const dailyRef = db.collection('aiDailyUsage').doc(`${uid}_${todayKey}`);
+const usageLedger = db ? createUsageLedger({
+  db, fieldValue: admin.firestore.FieldValue,
+  secret: process.env.AI_REQUEST_REPLAY_KEY || process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+  dateKey: getKstDateKey
+}) : null;
+const reserveUsageAtomic = (...args) => usageLedger.reserve(...args);
+const rollbackUsageReservation = (...args) => usageLedger.rollback(...args);
 
-  return db.runTransaction(async (tx) => {
-    const userSnap = await tx.get(userRef);
-    if (!userSnap.exists) throw usageError('USER_NOT_FOUND');
-    const userData = userSnap.data() || {};
-
-    // 관리자 계정은 프리미엄/무료/질문권 여부와 무관하게 KST 기준 하루 100회.
-    if (isAdminUser) {
-      const dailySnap = await tx.get(dailyRef);
-      const count = dailySnap.exists ? Number(dailySnap.data().count || 0) : 0;
-
-      if (count >= ADMIN_DAILY_LIMIT) {
-        throw usageError(
-          'DAILY_LIMIT_REACHED',
-          `관리자 오늘 상담 가능 횟수 ${ADMIN_DAILY_LIMIT}회를 모두 사용했습니다.`
-        );
-      }
-
-      tx.set(dailyRef, {
-        count: admin.firestore.FieldValue.increment(1),
-        uid,
-        date: todayKey,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-
-      return {
-        kind: 'admin',
-        todayKey,
-        isPremiumNow: true,
-        isAdmin: true,
-        freeUsed: null,
-        usingCredit: false,
-        questionCreditsLeft: null,
-        dailyUsed: count + 1,
-        dailyLimit: ADMIN_DAILY_LIMIT
-      };
-    }
-
-    const premiumNow = !!userData.premium && (userData.premiumUntil || 0) > Date.now();
-
-    if (premiumNow) {
-      const dailySnap = await tx.get(dailyRef);
-      const count = dailySnap.exists ? Number(dailySnap.data().count || 0) : 0;
-      if (count >= PREMIUM_DAILY_LIMIT) {
-        throw usageError('DAILY_LIMIT_REACHED', '오늘 상담 가능 횟수를 모두 사용하셨어요. 내일 다시 이용해주세요.');
-      }
-      tx.set(dailyRef, {
-        count: admin.firestore.FieldValue.increment(1),
-        uid,
-        date: todayKey,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-      return {
-        kind: 'premium',
-        todayKey,
-        isPremiumNow: true,
-        freeUsed: null,
-        usingCredit: false,
-        questionCreditsLeft: null,
-        dailyUsed: count + 1,
-        dailyLimit: PREMIUM_DAILY_LIMIT,
-        isAdmin: false
-      };
-    }
-
-    const freeUsed = Number(userData.aiFreeUsed || 0);
-    const credits = Number(userData.aiQuestionCredits || 0);
-
-    if (freeUsed < FREE_TURN_LIMIT) {
-      tx.set(userRef, {
-        aiFreeUsed: admin.firestore.FieldValue.increment(1)
-      }, { merge: true });
-      return {
-        kind: 'free',
-        isPremiumNow: false,
-        freeUsed: freeUsed + 1,
-        usingCredit: false,
-        questionCreditsLeft: credits,
-        dailyUsed: null
-      };
-    }
-
-    if (credits > 0) {
-      tx.set(userRef, {
-        aiQuestionCredits: admin.firestore.FieldValue.increment(-1)
-      }, { merge: true });
-      return {
-        kind: 'credit',
-        isPremiumNow: false,
-        freeUsed,
-        usingCredit: true,
-        questionCreditsLeft: Math.max(0, credits - 1),
-        dailyUsed: null
-      };
-    }
-
-    throw usageError(
-      'FREE_LIMIT_REACHED',
-      '무료 질문 3개를 모두 사용하셨어요. 질문권을 구매하거나 프리미엄으로 업그레이드하면 계속 이어서 물어보실 수 있어요.'
-    );
-  });
-}
-
-async function rollbackUsageReservation(uid, reservation) {
-  if (!reservation || !reservation.kind) return;
-
-  try {
-    if (reservation.kind === 'premium' || reservation.kind === 'admin') {
-      const dailyRef = db.collection('aiDailyUsage').doc(`${uid}_${reservation.todayKey}`);
-      await db.runTransaction(async (tx) => {
-        const snap = await tx.get(dailyRef);
-        if (!snap.exists) return;
-        const count = Math.max(0, Number(snap.data().count || 0) - 1);
-        tx.set(dailyRef, {
-          count,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-      });
-      return;
-    }
-
-    const userRef = db.collection('users').doc(uid);
-    if (reservation.kind === 'free') {
-      await db.runTransaction(async (tx) => {
-        const snap = await tx.get(userRef);
-        if (!snap.exists) return;
-        const current = Number((snap.data() || {}).aiFreeUsed || 0);
-        tx.set(userRef, { aiFreeUsed: Math.max(0, current - 1) }, { merge: true });
-      });
-    } else if (reservation.kind === 'credit') {
-      await userRef.set({
-        aiQuestionCredits: admin.firestore.FieldValue.increment(1)
-      }, { merge: true });
-    }
-  } catch (rollbackError) {
-    // 답변 생성 실패보다 rollback 실패가 사용자 응답을 가리지 않도록 로그만 남깁니다.
-    console.error('[ai-chat] 사용량 rollback 실패:', rollbackError);
-  }
-}
-
- 
 async function authenticateRequest(req) {
   const authHeader = String(req.headers && req.headers.authorization || '').trim();
 
@@ -433,7 +292,8 @@ async function authenticateRequest(req) {
           return {
             uid: decoded.uid,
             provider: 'firebase',
-            email: String(decoded.email || '').trim().toLowerCase()
+            email: String(decoded.email || '').trim().toLowerCase(),
+            emailUnverified: decoded.firebase?.sign_in_provider === 'password' && decoded.email_verified !== true
           };
         }
       } catch (err) {
@@ -489,7 +349,7 @@ module.exports = async (req, res) => {
  
     return res.status(500).json({
       error: 'INIT_ERROR',
-      message: initError.message
+      message: '서버 연결 설정을 확인하고 있어요.'
     });
   }
  
@@ -506,6 +366,8 @@ module.exports = async (req, res) => {
   }
  
  
+  let activeUid;
+  let usageReservation;
   try {
  
     // ========================================================
@@ -514,6 +376,7 @@ module.exports = async (req, res) => {
  
     const {
       uid: claimedUid,
+      requestId: clientRequestId,
       sajuSummary,
       sajuProfile,
       subjects,
@@ -546,6 +409,11 @@ module.exports = async (req, res) => {
 
     // body.uid/email은 호환용 참고값일 뿐입니다. 권한 판단에는 검증된 토큰 정보만 사용합니다.
     const uid = identity.uid;
+    activeUid = uid;
+    if (identity.emailUnverified) return res.status(403).json({ error: 'EMAIL_VERIFICATION_REQUIRED' });
+    if (clientRequestId != null && !/^[A-Za-z0-9_-]{16,80}$/.test(String(clientRequestId))) return res.status(400).json({ error: 'INVALID_REQUEST_ID' });
+    const requestId = clientRequestId || crypto.randomUUID();
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify([message.trim(), sajuSummary, sajuProfile, subjects, history])).digest('hex');
     const verifiedEmail = String(identity.email || '').trim().toLowerCase();
     const isAdminUser = !!verifiedEmail && ADMIN_EMAILS.has(verifiedEmail);
 
@@ -577,50 +445,29 @@ module.exports = async (req, res) => {
     // 사용자 정보
     // ========================================================
  
-    const userRef = db.collection('users').doc(uid);
- 
-    let userSnap = await userRef.get();
- 
-    // 카카오 로그인 후 users 문서가 없는 경우
-    // 신규 무료 회원으로 생성
-    if (!userSnap.exists) {
- 
-      await userRef.set(
-        {
-          premium: false,
-          aiFreeUsed: 0,
-          createdAt: Date.now()
-        },
-        {
-          merge: true
-        }
-      );
- 
-      userSnap = await userRef.get();
-    }
- 
-    const userData = userSnap.data();
- 
- 
+    const userSnap = await db.collection('users').doc(uid).get();
+    const userData = userSnap.exists ? userSnap.data() : {};
+
     // ========================================================
     // 사용량 예약
     // ========================================================
 
-    let usageReservation;
     try {
-      usageReservation = await reserveUsageAtomic(uid, isAdminUser);
+      usageReservation = await reserveUsageAtomic(uid, isAdminUser, requestId, fingerprint);
+      if (usageReservation.replay) return res.status(200).json(usageReservation.replay);
     } catch (usageErr) {
+      if (['REQUEST_IN_PROGRESS', 'REQUEST_ID_CONFLICT', 'REPLAY_UNAVAILABLE'].includes(usageErr.code)) return res.status(409).json({ error: usageErr.code });
       if (usageErr && usageErr.code === 'DAILY_LIMIT_REACHED') {
         return res.status(403).json({
           error: 'DAILY_LIMIT_REACHED',
-          message: usageErr.message,
+          message: '오늘 상담 가능 횟수를 모두 사용하셨어요. 내일 다시 이용해주세요.',
           premiumDailyLimit: isAdminUser ? ADMIN_DAILY_LIMIT : PREMIUM_DAILY_LIMIT
         });
       }
       if (usageErr && usageErr.code === 'FREE_LIMIT_REACHED') {
         return res.status(403).json({
           error: 'FREE_LIMIT_REACHED',
-          message: usageErr.message,
+          message: '무료 답변 3회를 모두 사용하셨어요. 질문권이나 프리미엄으로 상담을 이어갈 수 있어요.',
           freeLimit: FREE_TURN_LIMIT,
           questionCredits: Number(userData.aiQuestionCredits || 0)
         });
@@ -777,7 +624,7 @@ module.exports = async (req, res) => {
       console.error(
         '[ai-chat] Anthropic API 오류:',
         anthropicRes.status,
-        errText
+        '[upstream body omitted]'
       );
  
       return res.status(502).json({
@@ -805,6 +652,7 @@ module.exports = async (req, res) => {
         .join('\n')
         .trim();
 
+    const tokenUsage = { input: Number(data.usage?.input_tokens || 0), output: Number(data.usage?.output_tokens || 0) };
     const firstStopReason = String(data.stop_reason || '');
 
     // 출력 한도에 실제로 걸렸을 때만 한 번 이어서 생성합니다.
@@ -848,6 +696,8 @@ module.exports = async (req, res) => {
 
         if (continuationRes.ok) {
           const continuationData = await continuationRes.json();
+          tokenUsage.input += Number(continuationData.usage?.input_tokens || 0);
+          tokenUsage.output += Number(continuationData.usage?.output_tokens || 0);
           const continuationText = (continuationData.content || [])
             .filter(block => block.type === 'text')
             .map(block => block.text)
@@ -859,7 +709,7 @@ module.exports = async (req, res) => {
           }
         } else {
           const continuationError = await continuationRes.text().catch(() => '');
-          console.warn('[ai-chat] 잘린 답변 이어쓰기 실패:', continuationRes.status, continuationError);
+          console.warn('[ai-chat] 잘린 답변 이어쓰기 실패:', continuationRes.status);
         }
       } catch (continuationError) {
         console.warn('[ai-chat] 잘린 답변 이어쓰기 예외:', continuationError && continuationError.message);
@@ -869,7 +719,8 @@ module.exports = async (req, res) => {
     }
 
     if (!replyText) {
-      replyText = '죄송해요, 답변을 만드는 데 문제가 있었어요. 다시 시도해주세요.';
+      await rollbackUsageReservation(uid, usageReservation);
+      return res.status(502).json({ error: 'AI_EMPTY_RESPONSE', usageCharged: false });
     }
 
     // 모델이 Markdown 문법을 이스케이프해서 보낸 경우 \---, 1\.처럼
@@ -886,10 +737,12 @@ module.exports = async (req, res) => {
     // 여기까지 왔으면 성공한 요청이므로 그대로 확정합니다.
     // ========================================================
  
-    return res.status(200).json({
+    const response = {
  
       reply: replyText,
       stopReason: firstStopReason,
+      model: ANTHROPIC_MODEL,
+      tokenUsage,
  
       freeUsed: usageReservation.freeUsed,
 
@@ -904,10 +757,15 @@ module.exports = async (req, res) => {
       usingCredit: usageReservation.usingCredit,
 
       questionCreditsLeft: usageReservation.questionCreditsLeft
-    });
+    };
+    await usageLedger.finish(uid, usageReservation, response);
+    return res.status(200).json(response);
  
  
   } catch (error) {
+    if (activeUid && usageReservation && !usageReservation.replay) {
+      try { await rollbackUsageReservation(activeUid, usageReservation); } catch (_) { console.error('[ai-chat] rollback requires reconciliation'); }
+    }
  
     console.error(
       '[ai-chat] 예외 발생:',

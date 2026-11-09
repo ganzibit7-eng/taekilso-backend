@@ -3,6 +3,9 @@
   "name": "taekilso-vercel-backend",
   "private": true,
   "version": "1.0.0",
+  "scripts": {
+    "test": "node --test test/*.test.cjs"
+  },
   "engines": {
     "node": "20.x"
   },
