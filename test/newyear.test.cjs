@@ -9,9 +9,20 @@ function memory(initial={}){
  const db={collection(col){let filters=[],limit=Infinity;return {doc:id=>ref(col+'/'+id),where(k,op,v){assert.equal(op,'==');filters.push([k,v]);return this},limit(n){limit=n;return this},async get(){return {docs:[...rows.keys()].filter(k=>k.startsWith(col+'/')&&filters.every(([field,v])=>rows.get(k)[field]===v)).slice(0,limit).map(snap)}}}},runTransaction(fn){const run=queue.then(()=>fn({get:r=>r.get(),set(r,v,o){events.push(['set',r.key]);put(r.key,v,o?.merge)},update(r,v){events.push(['update',r.key]);put(r.key,v,true)}}));queue=run.catch(()=>{});return run}};return {db,rows,events};
 }
 function res(){return {headers:{},setHeader(k,v){this.headers[k]=v},status(code){this.code=code;return this},json(body){this.body=body;return this},end(){return this}}}
-const report={overview:'한 해의 흐름',foundation:'기본 성향',areas:Array.from({length:4},(_,i)=>({title:'분야'+i,reading:'해석',action:'실천'})),months:Array.from({length:12},(_,i)=>({month:i+1,theme:'이달',reading:'해석',action:'실천'})),opportunities:'기회',cautions:'주의',closing:'마무리'};
+const longReading='현실 조건을 확인하고 선택 기준을 정리하세요. '.repeat(25);
+const report={overview:'한 해의 흐름',foundation:'기본 성향',areas:Array.from({length:4},(_,i)=>({title:'분야'+i,reading:longReading,action:'실천'})),months:Array.from({length:12},(_,i)=>({month:i+1,theme:'이달',reading:longReading,action:'실천'})),opportunities:'기회',cautions:'주의',closing:'마무리'};
 const premium={premium:true,premiumUntil:Date.now()+86400000,lastOrderId:'paid',lastVerificationMethod:'server-verified'};
 const order={uid:'member',product:'taekilso_premium_30days',status:'paid',mul_no:'verified-transaction',pay_state:4};
+test('ordinary money advice mentioning unavailable annual data does not become a purchase gate',async()=>{
+ const f=chatFixture({premium:false,aiFreeUsed:0},'2027 신년 자료는 제공되지 않았습니다. 목표 저축액을 남은 개월 수로 나누어 비교하세요.'),r=res();
+ await f.handler({method:'POST',headers:{authorization:'Bearer test'},body:{message:'매달 저축할 기준을 알려줘',sajuProfile:profile}},r);
+ assert.equal(r.code,200);assert.equal(r.body.error,undefined);assert.equal(f.calls(),1);
+});
+test('unrequested annual generation is rejected as an answer error, never as a purchase request',async()=>{
+ const f=chatFixture({premium:false,aiFreeUsed:0},'2027년 신년운세를 풀이합니다.'),r=res();
+ await f.handler({method:'POST',headers:{authorization:'Bearer test'},body:{message:'저축 기준 알려줘',sajuProfile:profile}},r);
+ assert.equal(r.code,502);assert.equal(r.body.error,'AI_SCOPE_VALIDATION_FAILED');assert.equal(f.rows.get('users/member').aiFreeUsed,0);
+});
 test('server calculation supplies 12 calendar months, KST solar-term boundaries and no invented unknown hour/cycle',()=>{const c=calculate(profile);assert.deepEqual(c.pillars,{year:'己巳',month:'丙子',day:'丙寅'});assert.equal(c.daewoon,null);assert.equal(c.annual.ganZhi,'丁未');assert.equal(c.annual.startsAt,'2027-02-04 10:46:18 KST');assert.equal(c.months.length,12);assert.equal(c.months[0].segments[0].yearGanZhi,'丙午');assert.equal(c.months[1].segments.at(-1).yearGanZhi,'丁未');assert.equal(c.months[0].segments[0].untilExclusive,'2027-01-05 23:09:58 KST');assert(c.limitations.some(x=>x.includes('대운')));});
 test('known hour and gender produce cycles; impossible dates and times are rejected',()=>{assert(calculate({...profile,hourValue:'12',gender:'male'}).daewoon.cycles.length);for(const p of [{...profile,m:2,d:30},{...profile,hourValue:24},{...profile,y:1899}])assert.throws(()=>calculate(p));assert.equal(calculate({...profile,y:2023,m:2,d:1,calType:'lunar',isLeap:true}).profile.date,'2023-03-22');});
 test('annual intent handles variants, follow-ups and scope without poisoning unrelated general questions',()=>{for(const q of ['２０２７ 신년운세','새 해 운세','내년에 직업은','이천이십칠년 운세','next year fortune'])assert(isNewyearRequest(q));assert(isNewyearRequest('그럼 몇 월이 좋아?',[{content:'2027 운세'}]));assert(!isNewyearRequest('내 성격 알려줘',[{content:'2027 운세'}]));assert(!isNewyearRequest('나는 1990년생이야'));assert(isNewyearRequest('이어서 봐줘',[],'newyear'));});
