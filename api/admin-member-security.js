@@ -22,9 +22,9 @@ const ADMIN_EMAIL = 'green092432@gmail.com';
 async function requireAdmin(req) {
   const header = String(req.headers.authorization || '').trim();
   if (!header.startsWith('Bearer ')) throw Object.assign(new Error('관리자 로그인이 필요합니다.'), { status: 401, code: 'UNAUTHORIZED' });
-  const decoded = await admin.auth().verifyIdToken(header.slice(7).trim());
+  const decoded = await admin.auth().verifyIdToken(header.slice(7).trim(), true);
   const email = String(decoded.email || '').trim().toLowerCase();
-  if (!decoded.uid || email !== ADMIN_EMAIL) throw Object.assign(new Error('관리자 권한이 없습니다.'), { status: 403, code: 'FORBIDDEN' });
+  if (!decoded.uid || decoded.email_verified!==true || email !== ADMIN_EMAIL) throw Object.assign(new Error('관리자 권한이 없습니다.'), { status: 403, code: 'FORBIDDEN' });
   return decoded;
 }
 

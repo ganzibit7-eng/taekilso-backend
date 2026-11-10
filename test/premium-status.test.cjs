@@ -1,0 +1,14 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{createRequire}=require('node:module');
+const {DAY}=require('../lib/payment-entitlements');
+function fixture(orders,user={premium:false}){
+ const rows=new Map([['users/member',user],...orders.map((o,i)=>['paymentOrders/order'+i,{uid:'member',product:'taekilso_premium_30days',status:'paid',pay_state:4,mul_no:'p'+i,...o}])]);
+ const ref=key=>({key,async get(){return {exists:rows.has(key),data:()=>rows.get(key)}}});
+ const db={collection:c=>({doc:id=>ref(c+'/'+id),where(field,op,val){return {async get(){return {docs:[...rows].filter(([k,v])=>k.startsWith(c+'/')&&v[field]===val).map(([k,v])=>({id:k.split('/')[1],data:()=>v}))}}}}}),async runTransaction(fn){return fn({get:r=>r.get(),set(r,v){rows.set(r.key,{...rows.get(r.key),...v})}})}};
+ const admin={apps:[{}],auth:()=>({async verifyIdToken(token,revoke){assert.equal(revoke,true);return {uid:'member'}}}),firestore:()=>db};admin.firestore.FieldValue={serverTimestamp:()=>Date.now()};
+ const filename=path.resolve(__dirname,'../api/premium-status.js'),realRequire=createRequire(filename),context={module:{exports:{}},require:n=>n==='firebase-admin'?admin:realRequire(n),console:{error(){}}};vm.runInNewContext(fs.readFileSync(filename,'utf8'),context,{filename});
+ async function request(){const res={setHeader(){},status(n){this.code=n;return this},json(v){this.body=v;return this}};await context.module.exports({method:'POST',headers:{authorization:'Bearer verified'}},res);return res;}
+ return {rows,request};
+}
+test('cancelled legacy paid marker or updatedAt cannot recover premium',async()=>{const now=Date.now();for(const order of [{lastPayState:9,createdAtMs:now},{updatedAt:now},{createdAtMs:now-90*DAY,updatedAt:now}]){const f=fixture([order]);const r=await f.request();assert.equal(r.code,200);assert.equal(r.body.active,false);assert.equal(f.rows.get('users/member').premium,false);}});
+test('valid immutable payment recovers an attributed remaining period and admin revocation wins',async()=>{const paid=Date.now()-2*DAY;const f=fixture([{paidAtMs:paid}]);const r=await f.request();assert.equal(r.body.active,true);assert.equal(r.body.recovered,true);assert.equal(r.body.premiumUntil,paid+30*DAY);assert.equal(f.rows.get('users/member').premiumLots[0].orderId,'order0');const revoked=fixture([{paidAtMs:paid}],{premium:false,lastAdminPremiumRevokeAt:paid+DAY});assert.equal((await revoked.request()).body.active,false);});
+test('new purchase after administrator revocation does not resurrect earlier revoked purchases',async()=>{const now=Date.now(),f=fixture([{paidAtMs:now-5*DAY},{paidAtMs:now-DAY}],{premium:false,lastAdminPremiumRevokeAt:now-3*DAY});const r=await f.request();assert.equal(r.body.premiumUntil,now+29*DAY);assert.equal(r.body.paidPremiumOrders,1);});

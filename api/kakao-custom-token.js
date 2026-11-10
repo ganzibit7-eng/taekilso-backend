@@ -2,6 +2,7 @@
 // 카카오 서버가 확인한 실제 사용자 ID만 Firebase UID로 사용합니다.
 
 const admin = require('firebase-admin');
+const {assertMemberAllowed}=require('../lib/member-access');
 
 const DEFAULT_ALLOWED_ORIGINS = new Set([
   'https://taekilso.com',
@@ -144,6 +145,8 @@ module.exports = async (req, res) => {
     const account = me.kakao_account || {};
     const profileData = account.profile || {};
 
+    await assertMemberAllowed(admin.firestore(), {uid, email:account.is_email_verified===true?account.email:undefined});
+
     const customToken = await admin.auth().createCustomToken(uid, {
       loginProvider: 'kakao'
     });
@@ -164,6 +167,7 @@ module.exports = async (req, res) => {
     });
 
   } catch (err) {
+    if(err.status===403)return res.status(403).json({error:err.code,message:err.message});
     if (err && err.name === 'AbortError') {
       console.error('[kakao-custom-token] Kakao API timeout');
 

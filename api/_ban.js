@@ -184,14 +184,15 @@ async function deleteUserData(db, uid) {
   } else {
     // 구버전 firebase-admin fallback: 알려진 서브컬렉션을 먼저 지우고 users 문서를 삭제합니다.
     for (const sub of ['sajuProfiles', 'aiConversations']) {
-      const snap = await userRef.collection(sub).limit(500).get();
-      if (!snap.empty) {
+      while (true) {
+        const snap = await userRef.collection(sub).limit(500).get();
+        if (snap.empty) break;
         const batch = db.batch();
         snap.docs.forEach(d => batch.delete(d.ref));
         await batch.commit();
       }
     }
-    await userRef.delete().catch(() => {});
+    await userRef.delete();
   }
 }
 

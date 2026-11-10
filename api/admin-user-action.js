@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const {buildIdentifiers,createPermanentBan,deleteUserData}=require('./_ban');
 const crypto = require('crypto');
 
 let db = null;
@@ -84,7 +85,7 @@ async function verifyAdmin(req) {
     .trim()
     .toLowerCase();
 
-  if (!ADMIN_EMAILS.has(email)) {
+  if (decoded.email_verified!==true || !ADMIN_EMAILS.has(email)) {
     throw new Error('FORBIDDEN');
   }
 
@@ -771,22 +772,11 @@ module.exports = async (req, res) => {
       /*
        * 개인정보 성격의 회원 하위 데이터는 삭제
        */
-      await deleteCollection(
-        userRef.collection(
-          'sajuProfiles'
-        )
-      );
-
-
-      await deleteCollection(
-        userRef.collection(
-          'aiConversations'
-        )
-      );
-
-
-      // 회원 메인 문서 삭제
-      await userRef.delete();
+      const memberSnap=await userRef.get();
+      const member=memberSnap.exists?memberSnap.data():{};
+      const identifiers=await buildIdentifiers(admin,db,uid);
+      await createPermanentBan(admin,db,{uid,identifiers,email:member.email||'',nickname:member.nickname||'',provider:member.provider||'',adminUid:actor.uid});
+      await deleteUserData(db,uid);
 
 
       /*

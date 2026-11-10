@@ -1,0 +1,11 @@
+# Payment and member access safeguards
+
+Payment callbacks still require the existing server-only `PAYAPP_LINKVAL`; optional `PAYAPP_LINKKEY` is checked when configured. Optional `PAYAPP_REQUESTKEY` enables the PayApp response SHA-256 signature (`userid + responsedate + requestkey`) and a 15-minute timestamp window. Do not enable it until callback hash delivery is configured in PayApp. No credential settings were changed by this patch.
+
+Verified purchases now carry `paidAtMs`, `entitlementVersion`, and order-attributed remaining credit/premium lots. Refunds and partial refunds terminate that order's unused service, preserving other purchases and administrative balances. FIFO consumption applies to the new ledger. Duplicate callbacks do not grant/revoke twice; cancellation is terminal even when a delayed paid callback follows. Partial cancellation uses `orig_mul_no` and `orig_price`; revenue counters reverse only the refunded amount while purchase counts exclude the cancelled order.
+
+Legacy balances without reliable order attribution are preserved and marked `entitlementReviewRequired` when cancellation arrives. This avoids deleting a different legitimate purchase. Such orders cannot recover premium or unlock annual consultation. This is a compatibility limitation, not a claim that historical unattributed balances have been individually reconciled. Existing paid/cancelled order records and customer data were not modified during implementation.
+
+Recovery uses immutable payment timestamps (or conservative legacy creation time), never `updatedAt`, and reads the user and orders transactionally. Administrator revocation excludes earlier purchases. Shared server-side member checks enforce UID/email/Kakao permanent bans and deletion cooldowns. Firebase token verification checks revocation. Both administrator deletion routes use the same ban and data deletion implementation, including annual reports. No actual refund, account deletion or charge was executed in verification.
+
+`payappTransactions` stores authenticated callback deduplication records with an `expiresAt` field. Firestore TTL requires separate configuration; absence of TTL does not affect correctness. Callback logs do not store tokens or raw request bodies.

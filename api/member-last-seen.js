@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const {assertMemberAllowed}=require('../lib/member-access');
 
 let db = null;
 let initError = null;
@@ -173,7 +174,10 @@ module.exports = async (req, res) => {
     ========================= */
 
     const decoded =
-      await admin.auth().verifyIdToken(token);
+      await admin.auth().verifyIdToken(token, true);
+
+    if(decoded.firebase?.sign_in_provider==='anonymous')return res.status(401).json({error:'UNAUTHORIZED'});
+    await assertMemberAllowed(db, decoded);
 
     const uid = String(
       (decoded && decoded.uid) || ''
@@ -213,7 +217,7 @@ module.exports = async (req, res) => {
     await db
       .collection('users')
       .doc(uid)
-      .set(
+      .update(
         {
           lastSeenAt:
             admin.firestore
@@ -227,9 +231,6 @@ module.exports = async (req, res) => {
 
           lastSeenSource:
             source
-        },
-        {
-          merge: true
         }
       );
 
@@ -252,8 +253,8 @@ module.exports = async (req, res) => {
       err
     );
 
-    return res.status(401).json({
-      error: 'UNAUTHORIZED',
+    return res.status(err.status || 401).json({
+      error: err.code || 'UNAUTHORIZED',
       message:
         '최근 접속시간 인증에 실패했습니다.'
     });

@@ -31,7 +31,7 @@ module.exports = async (req, res) => {
   try {
     const header = String(req.headers.authorization || '').trim();
     if (!header.startsWith('Bearer ')) return res.status(401).json({ error: 'UNAUTHORIZED' });
-    const decoded = await admin.auth().verifyIdToken(header.slice(7).trim());
+    const decoded = await admin.auth().verifyIdToken(header.slice(7).trim(), true);
     const uid = decoded && decoded.uid;
     if (!uid) return res.status(401).json({ error: 'UNAUTHORIZED' });
 

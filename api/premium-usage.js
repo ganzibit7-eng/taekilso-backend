@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const {authenticate}=require('../lib/member-access');
 
 let db = null;
 let initError = null;
@@ -25,34 +26,6 @@ const ALLOWED_FEATURES = new Set([
   'premium_feature'
 ]);
 
-async function authenticateRequest(req) {
-  const authHeader = String((req.headers && req.headers.authorization) || '').trim();
-  if (authHeader.startsWith('Bearer ')) {
-    const token = authHeader.slice(7).trim();
-    if (token) {
-      try {
-        const decoded = await admin.auth().verifyIdToken(token);
-        if (decoded && decoded.uid) return decoded.uid;
-      } catch (err) {}
-    }
-  }
-
-  const kakaoToken = String((req.headers && req.headers['x-kakao-access-token']) || '').trim();
-  if (kakaoToken) {
-    try {
-      const kakaoRes = await fetch('https://kapi.kakao.com/v2/user/me', {
-        headers: { Authorization: 'Bearer ' + kakaoToken }
-      });
-      if (kakaoRes.ok) {
-        const me = await kakaoRes.json();
-        if (me && me.id) return 'kakao_' + String(me.id);
-      }
-    } catch (err) {}
-  }
-
-  return null;
-}
-
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -63,7 +36,8 @@ module.exports = async (req, res) => {
   if (initError) return res.status(500).json({ error: 'INIT_ERROR' });
 
   try {
-    const uid = await authenticateRequest(req);
+    const identity = await authenticate(req,admin,db);
+    const uid = identity?.uid;
     if (!uid) return res.status(401).json({ error: 'UNAUTHORIZED' });
 
     const featureRaw = String((req.body && req.body.feature) || 'premium_feature').slice(0, 60);
@@ -92,17 +66,17 @@ module.exports = async (req, res) => {
       createdAtMs: Date.now()
     });
 
-    batch.set(userRef, {
+    batch.update(userRef, {
       premiumUsageCount: admin.firestore.FieldValue.increment(1),
       lastPremiumUsedAt: admin.firestore.FieldValue.serverTimestamp(),
       lastPremiumFeature: feature
-    }, { merge: true });
+    });
 
     await batch.commit();
 
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('[premium-usage] error:', err);
-    return res.status(500).json({ error: 'SERVER_ERROR' });
+    return res.status(err.status||500).json({ error: err.code||'SERVER_ERROR' });
   }
 };
