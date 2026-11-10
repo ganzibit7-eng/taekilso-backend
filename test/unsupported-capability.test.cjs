@@ -1,0 +1,4 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const service=require('../lib/consultation-service');
+test('explicit unsupported determinations return an accurate server notice without inventing time-based support',async()=>{let calls=0;const result=await service.generate({body:{sajuProfile:{y:2000,m:2,d:4,calType:'solar',hourValue:'unknown',gender:'unknown'},message:'출생시간은 몰라요. 용신과 사주 강약을 확정해서 제 성향을 알려주세요.'},messages:[],model:'claude-haiku-4-5-20251001',key:'test',scope:'일반',fetchImpl:async()=>{calls++;throw Error('unexpected')},now:new Date('2026-11-11T00:00:00Z')});assert.equal(calls,0);assert(result.reply.includes('출생시간을 추가해도 이 제한은 같습니다'));assert(result.reply.includes('원국 후보'));assert.equal(result.diagnostics.estimated_usd,0);assert.equal(result.diagnostics.provider_calls,0);});
