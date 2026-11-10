@@ -6,6 +6,7 @@
     "node": "26.x"
   },
   "dependencies": {
-    "firebase-admin": "^13.0.0"
+    "firebase-admin": "^13.0.0",
+    "lunar-javascript": "1.7.5"
   }
 }

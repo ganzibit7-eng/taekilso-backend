@@ -175,6 +175,9 @@ async function unbanPermanent(admin, db, banId, adminUid = '') {
 }
 
 async function deleteUserData(db, uid) {
+  // Annual reports are server-only documents outside the user's profile tree.
+  const reportKey=require('node:crypto').createHash('sha256').update(uid).digest('hex')+'_2027';
+  await db.collection('newyearReports').doc(reportKey).delete();
   const userRef = db.collection('users').doc(uid);
   if (typeof db.recursiveDelete === 'function') {
     await db.recursiveDelete(userRef);

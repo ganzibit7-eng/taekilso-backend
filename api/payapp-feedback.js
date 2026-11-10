@@ -35,6 +35,7 @@ const PRODUCTS = {
   taekilso_premium_30days: {
     price: 8900,
     goodname: '택일소 프리미엄 30일 이용권',
+    acceptedNames: ['택일소 프리미엄 30일 이용권', '2027 신년상담 · 30일 이용권'],
     // 구독형: 30일간 이용권 + 이용 횟수 초기화
     grant: (tx, userRef, context = {}) => {
       const now = context.now || Date.now();
@@ -151,7 +152,7 @@ module.exports = async (req, res) => {
     const product = PRODUCTS[order.product];
     if (!product) { result = 'UNKNOWN_PRODUCT'; return res.status(200).send(result); }
     if (price !== product.price) { result = 'INVALID_PRICE'; return res.status(200).send(result); }
-    if (goodname !== product.goodname) { result = 'INVALID_PRODUCT_NAME'; return res.status(200).send(result); }
+    if (!(product.acceptedNames || [product.goodname]).includes(goodname)) { result = 'INVALID_PRODUCT_NAME'; return res.status(200).send(result); }
     if (order.amount !== product.price) {
       result = 'INVALID_ORDER_DATA';
       return res.status(200).send(result);

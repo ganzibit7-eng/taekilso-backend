@@ -13,5 +13,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26
-      - run: node --test test/admin-report.test.cjs
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node --test test/*.test.cjs
       - run: node --check api/admin-report.js
+      - run: node --check api/ai-chat.js
