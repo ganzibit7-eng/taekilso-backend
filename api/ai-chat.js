@@ -3,6 +3,9 @@
  
 const admin = require('firebase-admin');
 const newyearAccess = require('../lib/newyear-access');
+const {assertMemberAllowed} = require('../lib/member-access');
+const {consumeCreditPatch,rollbackCreditPatch} = require('../lib/payment-entitlements');
+const {recordMilestone} = require('../lib/consultation-metrics');
 const consultationService = require('../lib/consultation-service');
 const { calculate: calculateNewyear } = require('../lib/newyear-calculation');
 const { createService: createNewyearService, reportId: newyearReportId } = require('../lib/newyear-report');
@@ -369,11 +372,12 @@ async function reserveUsageAtomic(uid, isAdminUser = false) {
     }
 
     if (credits > 0) {
-      tx.set(userRef, {
-        aiQuestionCredits: admin.firestore.FieldValue.increment(-1)
-      }, { merge: true });
+      const consumed = consumeCreditPatch(userData);
+      if (!consumed) throw usageError('FREE_LIMIT_REACHED');
+      tx.set(userRef, consumed.patch, { merge: true });
       return {
         kind: 'credit',
+        creditOrderId: consumed.creditOrderId,
         isPremiumNow: false,
         freeUsed,
         usingCredit: true,
@@ -416,9 +420,13 @@ async function rollbackUsageReservation(uid, reservation) {
         tx.set(userRef, { aiFreeUsed: Math.max(0, current - 1) }, { merge: true });
       });
     } else if (reservation.kind === 'credit') {
-      await userRef.set({
-        aiQuestionCredits: admin.firestore.FieldValue.increment(1)
-      }, { merge: true });
+      await db.runTransaction(async tx => {
+        const snap = await tx.get(userRef);
+        const order = reservation.creditOrderId ? await tx.get(db.collection('paymentOrders').doc(reservation.creditOrderId)) : null;
+        if (!snap.exists) return;
+        const patch = rollbackCreditPatch(snap.data() || {}, reservation, order?.exists ? order.data() : null);
+        if (patch) tx.set(userRef, patch, {merge:true});
+      });
     }
   } catch (rollbackError) {
     // 답변 생성 실패보다 rollback 실패가 사용자 응답을 가리지 않도록 로그만 남깁니다.
@@ -518,7 +526,8 @@ module.exports = async (req, res) => {
         }
         return identity;
       }
-    })(req, res); } catch (_) {
+    })(req, res); } catch (error) {
+      if (error?.status === 403) return res.status(403).json({error:error.code,message:error.message,usageCharged:false});
       return res.status(503).json({error:'NEWYEAR_UNAVAILABLE',message:'신년상담을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.',usageCharged:false});
     }
   }
@@ -567,6 +576,9 @@ module.exports = async (req, res) => {
         message: '로그인 세션을 확인하지 못했어요. 다시 로그인해주세요.'
       });
     }
+
+    try { await assertMemberAllowed(db,identity); }
+    catch (error) { return res.status(error.status || 503).json({error:error.code || 'ACCESS_CHECK_FAILED',message:error.status===403?error.message:'계정 이용 상태를 확인하지 못했어요. 잠시 후 다시 시도해주세요.',usageCharged:false}); }
 
     // body.uid/email은 호환용 참고값일 뿐입니다. 권한 판단에는 검증된 토큰 정보만 사용합니다.
     const uid = identity.uid;
@@ -646,6 +658,9 @@ module.exports = async (req, res) => {
     }
  
  
+    const unsupportedNotice = consultationService.capabilityNotice(message);
+    if (unsupportedNotice) return res.status(200).json({reply:unsupportedNotice,stopReason:'server_capability',usageCharged:false,evidence:[]});
+
     // ========================================================
     // 사용량 예약
     // ========================================================
@@ -662,6 +677,7 @@ module.exports = async (req, res) => {
         });
       }
       if (usageErr && usageErr.code === 'FREE_LIMIT_REACHED') {
+        if (!isAdminUser) await recordMilestone(db,uid,'freeLimitExhausted',req.body.analytics).catch(()=>{});
         return res.status(403).json({
           error: 'FREE_LIMIT_REACHED',
           message: usageErr.message,
@@ -962,6 +978,11 @@ module.exports = async (req, res) => {
     if (!newyearAllowed && newyearAccess.containsAnnualReading(replyText)) {
       await rollbackUsageReservation(uid, usageReservation);
       return res.status(502).json({error:'AI_SCOPE_VALIDATION_FAILED',message:'질문 범위에 맞는 답변을 완성하지 못했어요. 질문 횟수는 사용되지 않았습니다. 다시 시도해 주세요.',usageCharged:false});
+    }
+
+    if (!isAdminUser && firstStopReason !== 'server_capability') {
+      await recordMilestone(db,uid,'firstAiAnswers',req.body.analytics).catch(()=>{});
+      if (usageReservation.kind === 'free' && usageReservation.freeUsed >= FREE_TURN_LIMIT) await recordMilestone(db,uid,'freeLimitExhausted',req.body.analytics).catch(()=>{});
     }
 
     return res.status(200).json({

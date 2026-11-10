@@ -34,3 +34,19 @@ test('long annual report checks all twelve real month values before server bindi
 });
 
 test('date comparison cannot reverse score rankings inside uncited option prose',()=>{const b=calc.build(body,at),a=sample();a.options=[{label:'12월 10일',suitable_when:'휴가가 편할 때',tradeoff:'택일 점수는 낮지만 실행 환경은 좋습니다.',next_action:'일정을 확인하세요.'}];assert(out.validate(a,b,prompt.memory([],body.message)).includes('UNGROUNDED_SCORE_COMPARISON'));a.options[0].tradeoff='업체 예약 가능 여부는 별도로 확인해야 합니다.';a.data_limitations=['택일 점수는 성공 확률이 아닙니다.'];assert.deepEqual(out.validate(a,b,prompt.memory([],body.message)),[]);});
+
+test('valid date references cannot be used to swap scores and rendering preserves each paired value',()=>{
+ const b=calc.build({...body,message:'이사 후보 2026년 12월 3일과 10일 비교'},at),a=sample(),[one,two]=b.date_candidates,c=b.charts[0];
+ a.blocks[0]={kind:'chart_fact',title:'후보 비교',text:`${one.value.date}은 ${two.value.score}점, ${two.value.date}은 ${one.value.score}점입니다.`,person_id:c.person_id,candidate_ids:c.candidates.map(c=>c.id),assessment_ids:[],context_ids:[],evidence:[one,two].map(d=>({id:d.id,path:'',value:JSON.stringify(d.value)}))};
+ assert(out.validate(a,b,prompt.memory([],body.message)).includes('DATE_SCORE_SERVER_ONLY'));
+ a.blocks[0].text='예약 가능 여부와 이사 비용은 실제 견적을 확인해야 합니다.';
+ assert.deepEqual(out.validate(a,b,prompt.memory([],body.message)),[]);
+ const rendered=out.render(a,b);for(const d of [one,two])assert(rendered.includes(`${d.value.date} · ${d.value.ganZhi} · ${d.value.score}점`));
+ a.blocks[0].title='후보 99점';assert(out.validate(a,b,prompt.memory([],body.message)).includes('DATE_SCORE_SERVER_ONLY'));
+ a.blocks[0].title='후보 비교';a.data_limitations=['후보는 99점'];assert(out.validate(a,b,prompt.memory([],body.message)).includes('UNGROUNDED_SCORE_COMPARISON'));
+});
+
+test('unsupported individual assessments are free capability notices while term definitions remain ordinary questions',()=>{
+ for(const q of ['내 용신 알려줘','내 사주가 신강인지 신약인지 판정해줘','격국 계산해줘','나는 신강이야?','신약인지 궁금해'])assert(service.capabilityNotice(q));
+ for(const q of ['용신의 뜻이 뭐야','신강이라는 개념을 설명해줘','이직 기준을 알려줘'])assert.equal(service.capabilityNotice(q),null);
+});
