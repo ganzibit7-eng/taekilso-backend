@@ -44,3 +44,21 @@ test('annual shape diagnostics identify the field without returning private gene
  const r=narrative();r.months[3].action='';
  await assert.rejects(quality.generate({profile,now,key:'test',model:'test',fetchImpl:fetchReport(r)}),e=>e.validationErrors.includes('REPORT_SHAPE:months.3.action:0')&&!JSON.stringify(e.validationErrors).includes(r.overview));
 });
+
+test('one scoped prose repair preserves source checks and all other sections and counts both calls',async()=>{
+ let calls=0;const bad=narrative();bad.foundation+='용신은 화입니다.';
+ const result=await quality.generate({profile,now,key:'test',model:'claude-haiku-4-5-20251001',fetchImpl:async(url,options)=>{
+  calls++;if(calls===1)return fetchReport(bad)(url,options);
+  const request=JSON.parse(options.body),input=JSON.parse(request.messages[0].content);assert.equal(request.tool_choice.name,'repair_newyear_sections');assert.deepEqual(input.sections.map(p=>p.path),['foundation']);
+  return {ok:true,json:async()=>({model:'claude-haiku-4-5-20251001',stop_reason:'tool_use',usage:{input_tokens:50,output_tokens:100},content:[{type:'tool_use',name:'repair_newyear_sections',input:{changes:[{path:'foundation',text:narrative().foundation}]}}]})};
+ }});
+ assert.equal(calls,2);assert.equal(result.diagnostics.validation_retries,1);assert.equal(result.diagnostics.usage.input_tokens,150);assert.equal(result.diagnostics.usage.output_tokens,300);assert.equal(result.report.months[0].reading,bad.months[0].reading);assert.equal(result.report.source_checks.dayGanZhi,'丙寅');
+});
+test('repair cannot modify source evidence or another section and cannot silently omit a target',()=>{
+ const targets=[{path:'foundation'}],r=narrative();
+ for(const changes of [[],[{path:'source_checks.dayGanZhi',text:'甲子'}],[{path:'overview',text:'변경'}],[{path:'foundation',text:''}]])assert.throws(()=>quality.applyRepairs(r,changes,targets),/INVALID_REPORT_REPAIR/);
+});
+test('failed repair keeps cost unknown and never runs a third provider call',async()=>{
+ let count=0;const r=narrative();r.foundation+='50만원을 쓰세요.';
+ await assert.rejects(quality.generate({profile,now,key:'test',model:'claude-haiku-4-5-20251001',fetchImpl:async(url,options)=>{count++;if(count===1)return fetchReport(r)(url,options);throw Object.assign(new Error('timeout'),{name:'TimeoutError'});}}),e=>e.diagnostics.provider_calls===2&&e.diagnostics.estimated_usd===null&&e.validationErrors.includes('REPAIR_FAILED'));assert.equal(count,2);
+});

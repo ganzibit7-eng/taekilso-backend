@@ -56,7 +56,7 @@ module.exports=async(req,res)=>{
     const patch=entitlement.grantPatch(user,orderId,order.product,now);
     if(accountExists)tx.set(userRef,{...patch,lastOrderId:orderId,lastPurchaseAt:now,lastVerificationMethod:order.product==='taekilso_premium_30days'?'server-verified':user.lastVerificationMethod||'server-verified',lastMulNoGranted:mulNo},{merge:true});
     tx.update(orderRef,{status:'paid',mul_no:mulNo,pay_state:4,lastPayState:4,paidAtMs:now,entitlementVersion:1,entitlementGranted:accountExists,entitlementReviewRequired:!accountExists,pay_type:value(body,'pay_type').slice(0,20),pay_date:value(body,'pay_date').slice(0,40),updatedAt:admin.firestore.FieldValue.serverTimestamp()});
-    tx.set(db.collection('stats').doc('counters'),{purchases:admin.firestore.FieldValue.increment(1),revenue:admin.firestore.FieldValue.increment(product.price),['purchasesByProduct.'+order.product]:admin.firestore.FieldValue.increment(1)},{merge:true});
+    tx.set(db.collection('stats').doc('counters'),{purchases:admin.firestore.FieldValue.increment(1),revenue:admin.firestore.FieldValue.increment(product.price),purchasesByProduct:{[order.product]:admin.firestore.FieldValue.increment(1)}},{merge:true});
    }else if(cancellation){
     const alreadyFull=['cancelled','refunded'].includes(order.status),priorRefund=Math.max(0,Number(order.refundedAmount)||0);
     const refundedAmount=partial?Math.min(product.price,priorRefund+price):product.price;
@@ -68,7 +68,7 @@ module.exports=async(req,res)=>{
      tx.update(orderRef,{status,lastPayState:state,lastMulNo:mulNo,mul_no:order.mul_no||originalNo,refundedAmount,entitlementRevokedAtMs:order.entitlementRevokedAtMs||now,entitlementReviewRequired:review,cancelledAtMs:now,updatedAt:admin.firestore.FieldValue.serverTimestamp()});
      if(order.paidAtMs||order.status==='paid'){
       const refundDelta=Math.max(0,refundedAmount-priorRefund),firstRefund=!order.entitlementRevokedAtMs;
-      tx.set(db.collection('stats').doc('counters'),{revenue:admin.firestore.FieldValue.increment(-refundDelta),...(firstRefund?{purchases:admin.firestore.FieldValue.increment(-1),['purchasesByProduct.'+order.product]:admin.firestore.FieldValue.increment(-1)}:{})},{merge:true});
+      tx.set(db.collection('stats').doc('counters'),{revenue:admin.firestore.FieldValue.increment(-refundDelta),...(firstRefund?{purchases:admin.firestore.FieldValue.increment(-1),purchasesByProduct:{[order.product]:admin.firestore.FieldValue.increment(-1)}}:{})},{merge:true});
      }
     }
    }else if(!terminal&&order.status!=='paid'){
