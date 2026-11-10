@@ -13,6 +13,11 @@ test('annual requests constrain object structure and locally reject array counts
  assert.equal(quality.schema.properties.months.minItems,12);assert.equal(quality.schema.properties.months.maxItems,12);
 });
 test('annual formatting restores double-escaped line breaks and preserves first opportunity paragraph',async()=>{const r=await quality.generate({profile,now,key:'test',model:'test',fetchImpl:fetchReport(narrative())});assert(r.report.opportunities.includes('첫 문단의 비교 기준을 보존합니다.\n\n다음 문단입니다.'));assert(!r.report.opportunities.includes('\\n'));assert.equal(r.report.months.length,12);assert(r.report.months.every(m=>m.calculationNote));});
+test('calendar quarter labels are not mistaken for invented minute values',async()=>{
+ const r=narrative();r.closing+=' 1분기의 실제 지출 기록과 계획을 비교하세요.';
+ const result=await quality.generate({profile,now,key:'test',model:'test',fetchImpl:fetchReport(r)});assert.equal(result.diagnostics.provider_calls,1);assert(result.report.closing.includes('1분기'));
+ r.closing+=' 10분 후에 결정하세요.';await assert.rejects(quality.generate({profile,now,key:'test',model:'test',fetchImpl:fetchReport(r)}),e=>e.validationErrors.includes('NUMERIC_FACT_SERVER_ONLY'));
+});
 test('annual report rejects observed unsupported income prediction',async()=>{const r=narrative();r.areas[1].reading+='올해는 수입 증가와 지출 증가가 동시에 일어날 가능성이 높습니다.';await assert.rejects(quality.generate({profile,now,key:'test',model:'test',fetchImpl:fetchReport(r)}),e=>e.validationErrors.includes('UNSUPPORTED_EVENT_PREDICTION'));});
 
 test('annual provider receives actual calendar context and returns its own source check echo',async()=>{
