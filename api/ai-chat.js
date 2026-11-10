@@ -631,7 +631,7 @@ module.exports = async (req, res) => {
         const reportSnap = await db.collection('newyearReports').doc(newyearReportId(uid)).get();
         const storedReport = reportSnap.exists ? reportSnap.data() : null;
         if (storedReport?.status === 'ready' && storedReport.profileHash === calculated.profileHash) {
-          newyearContext += '\n[이 계정의 같은 사주로 작성된 신년 리포트]\n' + JSON.stringify(storedReport.report) + '\n이 리포트에 대한 후속 질문은 실제 작성된 문맥을 이어 설명하세요. 확정적 사건 예측으로 확대하지 마세요.';
+          newyearContext += '\n[이 계정의 같은 사주로 작성된 신년 리포트]\n' + JSON.stringify(require('../lib/newyear-report').presentReport(storedReport.report, storedReport.calculation)) + '\n이 리포트에 대한 후속 질문은 실제 작성된 문맥을 이어 설명하세요. 확정적 사건 예측으로 확대하지 마세요.';
         } else {
           newyearContext += '\n현재 선택된 사주와 일치하는 저장 리포트가 없습니다. 기존 리포트의 문장을 아는 것처럼 인용하지 마세요.';
         }
