@@ -1,13 +1,11 @@
-
 {
   "name": "taekilso-vercel-backend",
   "private": true,
   "version": "1.0.0",
   "engines": {
-    "node": "20.x"
+    "node": "26.x"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0"
   }
 }
-
