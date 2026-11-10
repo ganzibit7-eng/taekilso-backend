@@ -158,7 +158,7 @@ module.exports = async (req, res) => {
       return res.status(200).send(result);
     }
 
-    if (order.status === 'paid' && order.mul_no === mulNo) {
+    if (order.status === 'paid' && order.mul_no === mulNo && ![8,32,9,64,70,71].includes(payState)) {
       result = 'SUCCESS_ALREADY_PAID';
       return res.status(200).send('SUCCESS');
     }
@@ -203,6 +203,7 @@ module.exports = async (req, res) => {
           status: 'paid',
           mul_no: mulNo || null,
           pay_state: 4,
+          lastPayState: 4,
           pay_type: postValue(body, 'pay_type'),
           pay_date: postValue(body, 'pay_date'),
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
