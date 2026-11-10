@@ -36,13 +36,40 @@ test('invalid/truncated generation fails without spending chat credits',async()=
 test('concurrent report generation claims a single provider request',async()=>{let unlock,started;const signal=new Promise(r=>started=r),wait=new Promise(r=>unlock=r);const f=serviceFixture(premium,async()=>{started();await wait;return {ok:true,json:async()=>({stop_reason:'tool_use',content:[{type:'tool_use',name:'write_newyear_report',input:structuredClone(report)}]})}});const first=res(),running=f.handler({body:{operation:'generate',profile}},first);await signal;const second=res();await f.handler({body:{operation:'generate',profile}},second);assert.equal(second.code,202);unlock();await running;assert.equal(first.code,200);assert.equal(f.calls(),1);});
 
 test('abandoned generation is reported as retryable failure instead of an infinite pending screen without mutating records',async()=>{const f=serviceFixture();f.rows.set('newyearReports/'+reportId('member'),{status:'pending',startedAt:Date.now()-181000,attempt:'old'});const r=res();await f.handler({body:{operation:'status'}},r);assert.equal(r.body.status,'failed');assert.equal(f.calls(),0);assert.equal(f.events.length,0);assert.equal(f.rows.get('newyearReports/'+reportId('member')).status,'pending');});
-function chatFixture(user,reply='일반 상담 답변',identity={uid:'member',email:'member@example.com'},provider){
+function chatFixture(user,reply='일반 상담 답변',identity={uid:'member',email:'member@example.com'},provider,now){
  const f=memory({'users/member':user,'paymentOrders/paid':order});let calls=0,kakaoCalls=0,body;
  const admin={apps:[{}],firestore:()=>f.db,auth:()=>({verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(identity instanceof Error)throw identity;return identity;}})};
  admin.firestore.FieldValue={increment:n=>({__increment:n}),serverTimestamp:()=>0};
  const filename=path.resolve(__dirname,'../api/ai-chat.js'),realRequire=createRequire(filename),context={module:{exports:{}},exports:{},require:name=>name==='firebase-admin'?admin:realRequire(name),process:{env:{ANTHROPIC_API_KEY:'test'}},console:{log(){},warn(){},error(){}},setTimeout,clearTimeout,AbortController,fetch:async(url,opts)=>{if(String(url).startsWith('https://kapi.kakao.com/')){kakaoCalls++;return {ok:true,json:async()=>({id:42})};}calls++;body=JSON.parse(opts.body);if(provider)return provider(body);const structured={status:'answer',headline:reply,blocks:[{kind:'practical_suggestion',title:'실천',text:'현실 조건을 확인해 보세요.',person_id:null,candidate_ids:[],assessment_ids:[],context_ids:[],evidence:[]}],options:[],actions:[],follow_up_question:null,data_limitations:[]};return {ok:true,json:async()=>body.tools?({model:body.model,stop_reason:'tool_use',content:[{type:'tool_use',name:'write_consultation',input:structured}]}):({stop_reason:'end_turn',content:[{type:'text',text:reply}]})}}};
+ if(now)context.Date=class extends Date {constructor(...args){super(...(args.length?args:[now()]));}static now(){return now();}};
  vm.runInNewContext(fs.readFileSync(filename,'utf8'),context,{filename});return {...f,handler:context.module.exports,calls:()=>calls,providerBody:()=>body,kakaoCalls:()=>kakaoCalls};
 }
+
+const quotaRequest=()=>({method:'POST',headers:{authorization:'Bearer account'},body:{message:'이직할 때 현실적인 선택 기준을 알려줘',sajuProfile:profile}});
+const quotaTime=Date.parse('2026-11-11T12:00:00Z'),quotaPremium={...premium,premiumUntil:quotaTime+86400000,aiFreeUsed:1,aiQuestionCredits:5};
+test('premium admits only the tenth concurrent question and preserves free/paid-credit balances',async()=>{
+ const f=chatFixture(quotaPremium,undefined,undefined,undefined,()=>quotaTime),key='aiDailyUsage/member_2026-11-11';
+ f.rows.set(key,{count:9});const responses=[res(),res(),res()];
+ await Promise.all(responses.map(r=>f.handler(quotaRequest(),r)));
+ assert.equal(f.calls(),1);assert.equal(f.rows.get(key).count,10);
+ const success=responses.filter(r=>r.code===200);assert.equal(success.length,1);assert.equal(success[0].body.premiumDailyUsed,10);assert.equal(success[0].body.premiumDailyLimit,10);
+ const blocked=responses.filter(r=>r.body.error==='DAILY_LIMIT_REACHED');assert.equal(blocked.length,2);blocked.forEach(r=>{assert.equal(r.code,403);assert.equal(r.body.premiumDailyLimit,10);});
+ assert.equal(f.rows.get('users/member').aiFreeUsed,1);assert.equal(f.rows.get('users/member').aiQuestionCredits,5);
+});
+test('existing usage at or above ten is retained and refused without another provider call',async()=>{
+ for(const count of [10,11,15]){const f=chatFixture(quotaPremium,undefined,undefined,undefined,()=>quotaTime),key='aiDailyUsage/member_2026-11-11',r=res();f.rows.set(key,{count});await f.handler(quotaRequest(),r);assert.equal(r.body.error,'DAILY_LIMIT_REACHED');assert.equal(f.calls(),0);assert.equal(f.rows.get(key).count,count);}
+});
+test('premium quota starts a new bucket exactly at Korean midnight',async()=>{
+ let now=Date.parse('2026-11-11T14:59:59Z');const f=chatFixture(quotaPremium,undefined,undefined,undefined,()=>now);f.rows.set('aiDailyUsage/member_2026-11-11',{count:10});
+ const before=res();await f.handler(quotaRequest(),before);assert.equal(before.body.error,'DAILY_LIMIT_REACHED');assert.equal(f.calls(),0);
+ now=Date.parse('2026-11-11T15:00:00Z');const after=res();await f.handler(quotaRequest(),after);assert.equal(after.code,200);assert.equal(after.body.premiumDailyUsed,1);assert.equal(after.body.premiumDailyLimit,10);assert.equal(f.rows.get('aiDailyUsage/member_2026-11-11').count,10);assert.equal(f.rows.get('aiDailyUsage/member_2026-11-12').count,1);
+});
+test('failed tenth premium answer restores its slot and does not deduct purchased credits',async()=>{
+ const f=chatFixture(quotaPremium,'',{uid:'member',email:'member@example.com'},async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})}),()=>quotaTime),key='aiDailyUsage/member_2026-11-11',r=res();f.rows.set(key,{count:9});await f.handler(quotaRequest(),r);assert.equal(r.code,502);assert.equal(f.rows.get(key).count,9);assert.equal(f.rows.get('users/member').aiQuestionCredits,5);
+});
+test('administrator daily allowance remains one hundred despite the premium policy change',async()=>{
+ const f=chatFixture(quotaPremium,undefined,{uid:'member',email:'green092432@gmail.com'},undefined,()=>quotaTime),key='aiDailyUsage/member_2026-11-11';f.rows.set(key,{count:99});const last=res();await f.handler(quotaRequest(),last);assert.equal(last.code,200);assert.equal(last.body.premiumDailyLimit,100);const denied=res();await f.handler(quotaRequest(),denied);assert.equal(denied.body.error,'DAILY_LIMIT_REACHED');assert.equal(denied.body.premiumDailyLimit,100);assert.equal(f.calls(),1);
+});
 test('actual chat handler refuses annual questions before usage and ignores forged uid/paid flags',async()=>{const f=chatFixture({premium:false,aiFreeUsed:0,aiQuestionCredits:50}),r=res();await f.handler({method:'POST',headers:{authorization:'Bearer test'},body:{uid:'owner',premium:true,message:'2027년 월별 운세를 봐줘',sajuProfile:profile}},r);assert.equal(r.code,403);assert.equal(r.body.error,'NEWYEAR_PASS_REQUIRED');assert.equal(f.calls(),0);assert.equal(f.events.length,0);assert.equal(f.rows.get('users/member').aiFreeUsed,0);});
 test('paid chat receives server-derived annual/month data despite missing hour and gender',async()=>{const f=chatFixture(premium,'제공된 계산값 범위에서 2027년 흐름을 설명해요.'),r=res();await f.handler({method:'POST',headers:{authorization:'Bearer test'},body:{message:'2027년 운세',sajuProfile:profile}},r);assert.equal(r.code,200);assert.equal(f.calls(),1);assert(f.providerBody().system.includes('2027-02-04 10:46:18 KST'));assert(f.providerBody().system.includes('대운이 누락되어도 전체 상담을 거절하지 말고'));});
 
