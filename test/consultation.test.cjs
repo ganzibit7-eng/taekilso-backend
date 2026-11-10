@@ -3,6 +3,11 @@ const calc=require('../lib/consultation-calculation'),prompt=require('../lib/con
 const profile={y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'};
 const body={sajuProfile:profile,message:'이직을 고민해요. 야근이 많고 연봉은 유지하고 싶어요.'};
 const at=new Date('2026-11-10T12:00:00Z');
+test('observed followup advice cannot guarantee undisclosed salary or job stability',()=>{
+ const b=calc.build(body,at),memory=prompt.memory([],body.message),s=sample();
+ for(const tradeoff of ['새 팀 적응이 필요하지만 급여와 고용 안정성은 유지됩니다.','급여와 직급은 유지됩니다.']){s.options=[{label:'역할 변경',suitable_when:'업무 조정이 가능할 때',tradeoff,next_action:'제안 조건을 확인하세요.'}];assert(out.validate(s,b,memory).includes('UNVERIFIED_EMPLOYMENT_GUARANTEE'));}
+ s.options[0].tradeoff='급여와 직급의 유지 여부는 회사 규정과 제안 조건을 확인해야 합니다.';assert.deepEqual(out.validate(s,b,memory),[]);
+});
 function sample(){return {status:'answer',headline:'연봉을 지키면서 업무시간을 비교해 보세요.',blocks:[{kind:'practical_suggestion',title:'선택 기준',text:'현재 직장과 새 제안의 야근·권한·보상을 같은 기준으로 확인해 보세요.',person_id:null,candidate_ids:[],assessment_ids:[],context_ids:[],evidence:[]}],options:[],actions:['희망 연봉의 하한과 감당할 근무시간을 적어보세요.'],follow_up_question:null,data_limitations:[]};}
 test('actual pilot weekday and inverted savings formula errors are rejected across output fields',()=>{
  const b=calc.build(body,at),memory=prompt.memory([],body.message),s=sample();
