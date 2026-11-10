@@ -3,6 +3,10 @@ const calc=require('../lib/consultation-calculation'),prompt=require('../lib/con
 const profile={y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'};
 const body={sajuProfile:profile,message:'이직을 고민해요. 야근이 많고 연봉은 유지하고 싶어요.'};
 const at=new Date('2026-11-10T12:00:00Z');
+test('role-adjustment followup selects the career module instead of a generic report',()=>{
+ assert.equal(prompt.topic('앞의 풀이를 반복하지 말고, 지금 회사에서 역할 조정을 먼저 시도하려면 어떤 기준으로 얘기하면 좋을까요?'),'career_business');
+ assert.equal(prompt.topic('급여와 부서 이동 조건을 어떻게 확인하나요?'),'career_business');
+});
 test('observed followup advice cannot guarantee undisclosed salary or job stability',()=>{
  const b=calc.build(body,at),memory=prompt.memory([],body.message),s=sample();
  for(const tradeoff of ['새 팀 적응이 필요하지만 급여와 고용 안정성은 유지됩니다.','급여와 직급은 유지됩니다.']){s.options=[{label:'역할 변경',suitable_when:'업무 조정이 가능할 때',tradeoff,next_action:'제안 조건을 확인하세요.'}];assert(out.validate(s,b,memory).includes('UNVERIFIED_EMPLOYMENT_GUARANTEE'));}
