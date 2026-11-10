@@ -70,6 +70,12 @@ test('repair cannot modify source evidence or another section and cannot silentl
  const targets=[{path:'foundation'}],r=narrative();
  for(const changes of [[],[{path:'source_checks.dayGanZhi',text:'甲子'}],[{path:'overview',text:'변경'}],[{path:'foundation',text:''}]])assert.throws(()=>quality.applyRepairs(r,changes,targets),/INVALID_REPORT_REPAIR/);
 });
+test('sentence repair preserves original spacing even if the provider trims its replacement',()=>{
+ const r=narrative();r.foundation='첫 문장입니다. 50만원을 쓰세요.\n다음 문장입니다.';
+ const targets=quality.repairTargets(r,{});assert.equal(targets.length,1);
+ const repaired=quality.applyRepairs(r,[{path:targets[0].path,text:'필요한 비용을 확인하세요.'}],targets);
+ assert.equal(repaired.foundation,'첫 문장입니다. 필요한 비용을 확인하세요.\n다음 문장입니다.');
+});
 test('failed repair keeps cost unknown and never runs a third provider call',async()=>{
  let count=0;const r=narrative();r.foundation+='50만원을 쓰세요.';
  await assert.rejects(quality.generate({profile,now,key:'test',model:'claude-haiku-4-5-20251001',fetchImpl:async(url,options)=>{count++;if(count===1)return fetchReport(r)(url,options);throw Object.assign(new Error('timeout'),{name:'TimeoutError'});}}),e=>e.diagnostics.provider_calls===2&&e.diagnostics.estimated_usd===null&&e.validationErrors.includes('REPAIR_FAILED'));assert.equal(count,2);
