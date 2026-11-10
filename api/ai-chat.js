@@ -786,7 +786,7 @@ module.exports = async (req, res) => {
       } catch (qualityError) {
         await rollbackUsageReservation(uid, usageReservation);
         console.warn('[ai-chat] grounded response rejected:', qualityError.code || 'PROVIDER_ERROR');
-        return res.status(qualityError.status || 502).json({error:qualityError.code || 'AI_UPSTREAM_ERROR',message:'답변의 근거를 확인하지 못했어요. 질문 횟수는 사용되지 않았으니 잠시 후 다시 시도해주세요.',...(isAdminUser&&req.body.qualityDiagnostics===true?{validationErrors:qualityError.validationErrors||[],diagnosticCode:qualityError.message}:{})});
+        return res.status(qualityError.status || 502).json({error:qualityError.code || 'AI_UPSTREAM_ERROR',message:'답변의 근거를 확인하지 못했어요. 질문 횟수는 사용되지 않았으니 잠시 후 다시 시도해주세요.',...(isAdminUser&&req.body.qualityDiagnostics===true?{validationErrors:qualityError.validationErrors||[],diagnosticCode:qualityError.message,qualityDiagnostics:qualityError.diagnostics||null}:{})});
       }
     } else {
     const controller = new AbortController();
