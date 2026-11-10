@@ -431,16 +431,18 @@ async function authenticateRequest(req) {
     const idToken = authHeader.slice(7).trim();
     if (idToken) {
       try {
-        const decoded = await admin.auth().verifyIdToken(idToken);
-        if (decoded && decoded.uid) {
+        const decoded = await admin.auth().verifyIdToken(idToken, true);
+        if (decoded && decoded.uid && decoded.firebase?.sign_in_provider !== 'anonymous') {
           return {
             uid: decoded.uid,
             provider: 'firebase',
             email: String(decoded.email || '').trim().toLowerCase()
           };
         }
+        return null;
       } catch (err) {
         console.warn('[ai-chat] Firebase ID 토큰 검증 실패:', err && err.message);
+        return null;
       }
     }
   }
