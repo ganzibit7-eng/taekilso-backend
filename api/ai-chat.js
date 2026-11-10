@@ -4,7 +4,7 @@
 const admin = require('firebase-admin');
 const newyearAccess = require('../lib/newyear-access');
 const { calculate: calculateNewyear } = require('../lib/newyear-calculation');
-const { createService: createNewyearService } = require('../lib/newyear-report');
+const { createService: createNewyearService, reportId: newyearReportId } = require('../lib/newyear-report');
  
 let db = null;
 let initError = null;
@@ -628,6 +628,13 @@ module.exports = async (req, res) => {
       try {
         const calculated = calculateNewyear(sajuProfile);
         newyearContext = '\n\n[서버에서 계산한 2027 신년상담 데이터]\n' + JSON.stringify(calculated) + '\n이 서버 계산값이 클라이언트 요약과 충돌하면 서버 계산값을 우선합니다. 제공된 2027 세운과 월운을 근거로 답하세요. 대운이 누락되어도 전체 상담을 거절하지 말고 제공된 범위를 해석하세요. 입력 부족·절기 경계의 한계는 알리되 값을 창작하지 마세요. 다른 연도 계산값은 제공되지 않았습니다.';
+        const reportSnap = await db.collection('newyearReports').doc(newyearReportId(uid)).get();
+        const storedReport = reportSnap.exists ? reportSnap.data() : null;
+        if (storedReport?.status === 'ready' && storedReport.profileHash === calculated.profileHash) {
+          newyearContext += '\n[이 계정의 같은 사주로 작성된 신년 리포트]\n' + JSON.stringify(storedReport.report) + '\n이 리포트에 대한 후속 질문은 실제 작성된 문맥을 이어 설명하세요. 확정적 사건 예측으로 확대하지 마세요.';
+        } else {
+          newyearContext += '\n현재 선택된 사주와 일치하는 저장 리포트가 없습니다. 기존 리포트의 문장을 아는 것처럼 인용하지 마세요.';
+        }
       } catch (_) {
         return res.status(400).json({error:'NEWYEAR_PROFILE_REQUIRED',message:'신년상담을 위해 상담할 사주를 먼저 선택해 주세요. 출생시간을 몰라도 세운과 월운 범위에서 확인할 수 있어요.',usageCharged:false});
       }
