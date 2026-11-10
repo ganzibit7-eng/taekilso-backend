@@ -39,3 +39,8 @@ test('model prose cannot invent exact calendar dates, amounts or unsupported ind
 test('upstream timeout preserves unknown cost rather than reporting a free generation',async()=>{
  await assert.rejects(quality.generate({profile,now,key:'test',model:'test',fetchImpl:async()=>{throw Object.assign(new Error('private provider response'),{name:'TimeoutError'});}}),e=>e.message==='AI_TIMEOUT'&&e.diagnostics.estimated_usd===null&&e.diagnostics.usage_known===false&&e.diagnostics.provider_calls===1&&!JSON.stringify(e.diagnostics).includes('private provider'));
 });
+
+test('annual shape diagnostics identify the field without returning private generated text',async()=>{
+ const r=narrative();r.months[3].action='';
+ await assert.rejects(quality.generate({profile,now,key:'test',model:'test',fetchImpl:fetchReport(r)}),e=>e.validationErrors.includes('REPORT_SHAPE:months.3.action:0')&&!JSON.stringify(e.validationErrors).includes(r.overview));
+});
