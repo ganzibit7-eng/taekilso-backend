@@ -49,8 +49,8 @@ test('one scoped prose repair preserves source checks and all other sections and
  let calls=0;const bad=narrative();bad.foundation+='용신은 화입니다.';
  const result=await quality.generate({profile,now,key:'test',model:'claude-haiku-4-5-20251001',fetchImpl:async(url,options)=>{
   calls++;if(calls===1)return fetchReport(bad)(url,options);
-  const request=JSON.parse(options.body),input=JSON.parse(request.messages[0].content);assert.equal(request.tool_choice.name,'repair_newyear_sections');assert.deepEqual(input.sections.map(p=>p.path),['foundation']);
-  return {ok:true,json:async()=>({model:'claude-haiku-4-5-20251001',stop_reason:'tool_use',usage:{input_tokens:50,output_tokens:100},content:[{type:'tool_use',name:'repair_newyear_sections',input:{changes:[{path:'foundation',text:narrative().foundation}]}}]})};
+  const request=JSON.parse(options.body),input=JSON.parse(request.messages[0].content);assert.equal(request.tool_choice.name,'repair_newyear_sections');assert.deepEqual(input.sections.map(p=>p.fieldPath),['foundation']);assert(input.sections[0].text.length<50);
+  return {ok:true,json:async()=>({model:'claude-haiku-4-5-20251001',stop_reason:'tool_use',usage:{input_tokens:50,output_tokens:100},content:[{type:'tool_use',name:'repair_newyear_sections',input:{changes:[{path:input.sections[0].path,text:' 실제 상황을 확인하세요.'}]}}]})};
  }});
  assert.equal(calls,2);assert.equal(result.diagnostics.validation_retries,1);assert.equal(result.diagnostics.usage.input_tokens,150);assert.equal(result.diagnostics.usage.output_tokens,300);assert.equal(result.report.months[0].reading,bad.months[0].reading);assert.equal(result.report.source_checks.dayGanZhi,'丙寅');
 });
@@ -61,4 +61,10 @@ test('repair cannot modify source evidence or another section and cannot silentl
 test('failed repair keeps cost unknown and never runs a third provider call',async()=>{
  let count=0;const r=narrative();r.foundation+='50만원을 쓰세요.';
  await assert.rejects(quality.generate({profile,now,key:'test',model:'claude-haiku-4-5-20251001',fetchImpl:async(url,options)=>{count++;if(count===1)return fetchReport(r)(url,options);throw Object.assign(new Error('timeout'),{name:'TimeoutError'});}}),e=>e.diagnostics.provider_calls===2&&e.diagnostics.estimated_usd===null&&e.validationErrors.includes('REPAIR_FAILED'));assert.equal(count,2);
+});
+
+test('more than twelve affected fields are repaired as short sentences while valid prose stays byte-identical',async()=>{
+ let count=0;const r=narrative();r.foundation+='용신은 화입니다.';for(const month of r.months)month.reading+=' 50만원을 쓰세요.\n 정상 문장은 그대로입니다.';
+ const result=await quality.generate({profile,now,key:'test',model:'test',fetchImpl:async(url,options)=>{count++;if(count===1)return fetchReport(r)(url,options);const sections=JSON.parse(JSON.parse(options.body).messages[0].content).sections;assert.equal(sections.length,13);assert(sections.every(s=>s.text.length<50));return {ok:true,json:async()=>({stop_reason:'tool_use',usage:{input_tokens:100,output_tokens:100},content:[{type:'tool_use',name:'repair_newyear_sections',input:{changes:sections.map(s=>({path:s.path,text:' 필요한 조건을 확인하세요.'}))}}]})};}});
+ assert.equal(count,2);assert.equal(result.report.overview,r.overview);assert(result.report.months.every(m=>m.reading.includes('정상 문장은 그대로입니다.')));assert.equal(result.diagnostics.validation_retries,1);
 });
