@@ -447,7 +447,8 @@ async function authenticateRequest(req) {
           return {
             uid: decoded.uid,
             provider: 'firebase',
-            email: String(decoded.email || '').trim().toLowerCase()
+            email: String(decoded.email || '').trim().toLowerCase(),
+            email_verified: decoded.email_verified === true
           };
         }
         return null;
@@ -583,7 +584,7 @@ module.exports = async (req, res) => {
     // body.uid/email은 호환용 참고값일 뿐입니다. 권한 판단에는 검증된 토큰 정보만 사용합니다.
     const uid = identity.uid;
     const verifiedEmail = String(identity.email || '').trim().toLowerCase();
-    const isAdminUser = !!verifiedEmail && ADMIN_EMAILS.has(verifiedEmail);
+    const isAdminUser = identity.email_verified === true && !!verifiedEmail && ADMIN_EMAILS.has(verifiedEmail);
 
     if (claimedUid && String(claimedUid) !== uid) {
       console.warn('[ai-chat] client uid mismatch ignored:', String(claimedUid), '=>', uid);
@@ -783,6 +784,17 @@ module.exports = async (req, res) => {
  
     // Comparison is restricted to a verified administrator and uses the same
     // normal access and quota reservation above. It cannot unlock paid scope.
+    try {
+      const attempt = await require('../lib/generation-attempts').reserveAttempt(db, uid, 'chat', {limit:isAdminUser ? 120 : 30});
+      if (!attempt.allowed) {
+        await rollbackUsageReservation(uid, usageReservation);
+        res.setHeader('Retry-After', String(attempt.retryAfter));
+        return res.status(429).json({error:'GENERATION_RATE_LIMITED',message:'짧은 시간에 상담 요청이 많았어요. 잠시 후 다시 시도해주세요. 질문 횟수는 차감하지 않았습니다.',retryAfter:attempt.retryAfter,usageCharged:false});
+      }
+    } catch (_) {
+      await rollbackUsageReservation(uid, usageReservation);
+      return res.status(503).json({error:'GENERATION_GUARD_UNAVAILABLE',message:'상담 요청 상태를 확인하지 못했어요. 잠시 후 다시 시도해주세요.',usageCharged:false});
+    }
     const legacyComparison = (!GROUNDED_ENABLED && !isAdminUser) || (isAdminUser && req.body.qualityVariant === 'legacy');
     const providerStarted = Date.now(), comparisonCalls = [];
     let replyText, firstStopReason, qualityResult;

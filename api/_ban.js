@@ -20,44 +20,10 @@ function uniq(list) {
 }
 
 async function buildIdentifiers(admin, db, uid, decoded = null) {
-  const identifiers = [];
-  if (uid) identifiers.push(`uid:${uid}`);
-
-  const decodedEmail = normalizeEmail(decoded && decoded.email);
-  if (decodedEmail) identifiers.push(`email:${decodedEmail}`);
-
-  let userRecord = null;
-  try {
-    userRecord = await admin.auth().getUser(uid);
-  } catch (_) {}
-
-  if (userRecord) {
-    const email = normalizeEmail(userRecord.email);
-    if (email) identifiers.push(`email:${email}`);
-    for (const p of userRecord.providerData || []) {
-      if (p && p.providerId && p.uid) identifiers.push(`provider:${p.providerId}:${p.uid}`);
-      const pe = normalizeEmail(p && p.email);
-      if (pe) identifiers.push(`email:${pe}`);
-    }
-  }
-
-  try {
-    const snap = await db.collection('users').doc(uid).get();
-    if (snap.exists) {
-      const u = snap.data() || {};
-      const email = normalizeEmail(u.email);
-      if (email) identifiers.push(`email:${email}`);
-      if (u.provider && u.providerUid) identifiers.push(`provider:${u.provider}:${u.providerUid}`);
-      if (u.kakaoId) identifiers.push(`provider:kakao:${u.kakaoId}`);
-    }
-  } catch (_) {}
-
-  // 카카오 Firebase UID가 kakao_<id> 형식이므로 안정적인 식별자로 한 번 더 저장합니다.
-  if (String(uid || '').startsWith('kakao_')) {
-    identifiers.push(`provider:kakao:${String(uid).slice(6)}`);
-  }
-
-  return uniq(identifiers);
+  // Only Firebase-controlled identity evidence may create cross-account keys.
+  // Fail closed if authoritative identity lookup fails before a destructive action.
+  const userRecord = await admin.auth().getUser(uid);
+  return require('../lib/restriction-identities').restrictionIdentifiers(uid, decoded, userRecord);
 }
 
 async function findPermanentBan(db, identifiers) {
@@ -175,6 +141,7 @@ async function unbanPermanent(admin, db, banId, adminUid = '') {
 }
 
 async function deleteUserData(db, uid) {
+  await db.collection('aiGenerationAttempts').doc(require('../lib/generation-attempts').key(uid,'chat')).delete();
   // Annual reports are server-only documents outside the user's profile tree.
   const reportKey=require('node:crypto').createHash('sha256').update(uid).digest('hex')+'_2027';
   await db.collection('newyearReports').doc(reportKey).delete();
