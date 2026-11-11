@@ -22,8 +22,10 @@ test('annual report rejects observed unsupported income prediction',async()=>{co
 
 test('annual provider receives actual calendar context and returns its own source check echo',async()=>{
  let supplied;const result=await quality.generate({profile,now,key:'test',model:'claude-haiku-4-5-20251001',fetchImpl:async(url,options)=>{supplied=JSON.parse(JSON.parse(options.body).messages[0].content);return fetchReport(narrative())(url,options);}});
- assert.equal(supplied.natal.commonPillars.day.ganZhi,'丙寅');assert.equal(supplied.annual.ganZhi,'丁未');assert.equal(supplied.annual.comparison.tenGodKorean,'겁재');assert.equal(supplied.daewoon,null);assert.equal(supplied.months.length,12);
- assert(supplied.months.every(m=>m.segments.every(s=>s.monthGanZhi&&s.comparison.reviewLens.question)));
+ assert.equal(supplied.source_checks_expected.dayGanZhi,'丙寅');assert.equal(supplied.source_checks_expected.annualGanZhi,'丁未');assert(supplied.natal.availablePillars.includes('day'));assert(!supplied.natal.availablePillars.includes('hour'));assert.equal(supplied.daewoon,null);assert.equal(supplied.months.length,12);
+ assert(supplied.months.every(m=>m.segments.every(s=>s.comparison.relation&&s.comparison.reviewLens.question)));
+ const {source_checks_expected,...writingContext}=supplied;
+ assert(!/2027-\d{2}-\d{2}|丙寅|丁未|겁재/.test(JSON.stringify(writingContext)));
  assert.equal(supplied.calculationVersion,result.bundle.version);assert(supplied.method.interpretation.includes('전문가가 검수한 길흉·사건 예측 규칙이 아니며'));
  assert(result.report.foundation.includes('丙寅'));assert(result.report.foundation.includes('겁재'));
  assert.equal(result.report.months[0].theme,[...new Set(supplied.months[0].segments.map(s=>s.comparison.reviewLens.theme))].join(' / '));
@@ -79,6 +81,22 @@ test('sentence repair preserves original spacing even if the provider trims its 
 test('failed repair keeps cost unknown and never runs a third provider call',async()=>{
  let count=0;const r=narrative();r.foundation+='50만원을 쓰세요.';
  await assert.rejects(quality.generate({profile,now,key:'test',model:'claude-haiku-4-5-20251001',fetchImpl:async(url,options)=>{count++;if(count===1)return fetchReport(r)(url,options);throw Object.assign(new Error('timeout'),{name:'TimeoutError'});}}),e=>e.diagnostics.provider_calls===2&&e.diagnostics.estimated_usd===null&&e.validationErrors.includes('REPAIR_FAILED'));assert.equal(count,2);
+});
+
+test('a residual date after repair is omitted without discarding verified prose, but a missing section still fails',async()=>{
+ for(const empty of [false,true]){
+  const original=narrative();const valid=empty?'':original.months[0].reading.trim();
+  original.months[0].reading='1일에 새 일을 시작하세요. '+valid;
+  let calls=0;
+  const run=quality.generate({profile,now,key:'test',model:'test',fetchImpl:async(url,options)=>{
+   if(++calls===1)return fetchReport(original)(url,options);
+   const sections=JSON.parse(JSON.parse(options.body).messages[0].content).sections;
+   return {ok:true,json:async()=>({stop_reason:'tool_use',usage:{input_tokens:50,output_tokens:50},content:[{type:'tool_use',name:'repair_newyear_sections',input:{changes:[{path:sections[0].path,text:'4일에 선택하세요.'}]}}]})};
+  }});
+  if(empty)await assert.rejects(run,e=>e.validationErrors.includes('NUMERIC_FACT_SERVER_ONLY'));
+  else {const result=await run;assert.equal(result.report.months[0].reading,valid);assert.equal(result.report.overview,original.overview);assert.equal(result.report.source_checks.dayGanZhi,'丙寅');assert.deepEqual(result.diagnostics.omitted_invalid_sentences,['months.0.reading@0']);}
+  assert.equal(calls,2);
+ }
 });
 
 test('more than twelve affected fields are repaired as short sentences while valid prose stays byte-identical',async()=>{
