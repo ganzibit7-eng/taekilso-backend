@@ -100,7 +100,7 @@ test('failed tenth premium answer restores its slot and does not deduct purchase
  const f=chatFixture(quotaPremium,'',{uid:'member',email:'member@example.com'},async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})}),()=>quotaTime),key='aiDailyUsage/member_2026-11-11',r=res();f.rows.set(key,{count:9});await f.handler(quotaRequest(),r);assert.equal(r.code,502);assert.equal(f.rows.get(key).count,9);assert.equal(f.rows.get('users/member').aiQuestionCredits,5);
 });
 test('administrator daily allowance remains one hundred despite the premium policy change',async()=>{
- const f=chatFixture(quotaPremium,undefined,{uid:'member',email:'green092432@gmail.com'},undefined,()=>quotaTime),key='aiDailyUsage/member_2026-11-11';f.rows.set(key,{count:99});const last=res();await f.handler(quotaRequest(),last);assert.equal(last.code,200);assert.equal(last.body.premiumDailyLimit,100);const denied=res();await f.handler(quotaRequest(),denied);assert.equal(denied.body.error,'DAILY_LIMIT_REACHED');assert.equal(denied.body.premiumDailyLimit,100);assert.equal(f.calls(),1);
+ const f=chatFixture(quotaPremium,undefined,{uid:'member',email:'green092432@gmail.com',email_verified:true},undefined,()=>quotaTime),key='aiDailyUsage/member_2026-11-11';f.rows.set(key,{count:99});const last=res();await f.handler(quotaRequest(),last);assert.equal(last.code,200);assert.equal(last.body.premiumDailyLimit,100);const denied=res();await f.handler(quotaRequest(),denied);assert.equal(denied.body.error,'DAILY_LIMIT_REACHED');assert.equal(denied.body.premiumDailyLimit,100);assert.equal(f.calls(),1);
 });
 test('actual chat handler refuses annual questions before usage and ignores forged uid/paid flags',async()=>{const f=chatFixture({premium:false,aiFreeUsed:0,aiQuestionCredits:50}),r=res();await f.handler({method:'POST',headers:{authorization:'Bearer test'},body:{uid:'owner',premium:true,message:'2027년 월별 운세를 봐줘',sajuProfile:profile}},r);assert.equal(r.code,403);assert.equal(r.body.error,'NEWYEAR_PASS_REQUIRED');assert.equal(f.calls(),0);assert.equal(f.events.length,0);assert.equal(f.rows.get('users/member').aiFreeUsed,0);});
 test('paid chat receives server-derived annual/month data despite missing hour and gender',async()=>{const f=chatFixture(premium,'제공된 계산값 범위에서 2027년 흐름을 설명해요.'),r=res();await f.handler({method:'POST',headers:{authorization:'Bearer test'},body:{message:'2027년 운세',sajuProfile:profile}},r);assert.equal(r.code,200);assert.equal(f.calls(),1);assert(f.providerBody().system.includes('2027-02-04 10:46:18 KST'));assert(f.providerBody().system.includes('대운이 누락되어도 전체 상담을 거절하지 말고'));});
@@ -116,8 +116,37 @@ test('revoked sign-in token is rejected without silently falling back to a diffe
 
 test('existing verified Kakao-only authentication remains available when no Firebase bearer is supplied',async()=>{const f=chatFixture({premium:false,aiFreeUsed:0});f.rows.set('users/kakao_42',{premium:false,aiFreeUsed:0});const r=res();await f.handler({method:'POST',headers:{'x-kakao-access-token':'verified-kakao'},body:{action:'newyear-report',operation:'status'}},r);assert.equal(r.code,200);assert.equal(r.body.access,false);assert.equal(f.kakaoCalls(),1);assert.equal(f.calls(),0);});
 
-test('verified administrator comparison uses actual provider metrics and still reserves ordinary admin usage',async()=>{const f=chatFixture({premium:false,aiFreeUsed:2},'새 상담',{uid:'member',email:'green092432@gmail.com'}),r=res();await f.handler({method:'POST',headers:{authorization:'Bearer verified'},body:{message:'이직 기준',sajuProfile:profile,qualityDiagnostics:true}},r);assert.equal(r.code,200);assert.equal(r.body.qualityDiagnostics.variant,'grounded');assert.equal(f.calls(),1);assert.equal(r.body.premiumDailyUsed,1);assert.equal(f.rows.get('users/member').aiFreeUsed,2);});
+test('verified administrator comparison uses actual provider metrics and still reserves ordinary admin usage',async()=>{const f=chatFixture({premium:false,aiFreeUsed:2},'새 상담',{uid:'member',email:'green092432@gmail.com',email_verified:true}),r=res();await f.handler({method:'POST',headers:{authorization:'Bearer verified'},body:{message:'이직 기준',sajuProfile:profile,qualityDiagnostics:true}},r);assert.equal(r.code,200);assert.equal(r.body.qualityDiagnostics.variant,'grounded');assert.equal(f.calls(),1);assert.equal(r.body.premiumDailyUsed,1);assert.equal(f.rows.get('users/member').aiFreeUsed,2);});
 
-test('rejected structured output rolls back reserved usage and cannot become a charged apology',async()=>{const f=chatFixture({premium:false,aiFreeUsed:2},'',{uid:'member',email:'green092432@gmail.com'},async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})})),r=res();await f.handler({method:'POST',headers:{authorization:'Bearer verified'},body:{message:'이직 기준',sajuProfile:profile}},r);assert.equal(r.code,502);assert.equal(f.calls(),1);assert.equal([...f.rows.entries()].find(([k])=>k.startsWith('aiDailyUsage/'))[1].count,0);assert.equal(f.rows.get('users/member').aiFreeUsed,2);});
+test('rejected structured output rolls back reserved usage and cannot become a charged apology',async()=>{const f=chatFixture({premium:false,aiFreeUsed:2},'',{uid:'member',email:'green092432@gmail.com',email_verified:true},async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})})),r=res();await f.handler({method:'POST',headers:{authorization:'Bearer verified'},body:{message:'이직 기준',sajuProfile:profile}},r);assert.equal(r.code,502);assert.equal(f.calls(),1);assert.equal([...f.rows.entries()].find(([k])=>k.startsWith('aiDailyUsage/'))[1].count,0);assert.equal(f.rows.get('users/member').aiFreeUsed,2);});
 
 test('forged diagnostic and preview flags never disclose administrator data or bypass annual paywall',async()=>{const f=chatFixture({premium:false,aiFreeUsed:0}),r=res();await f.handler({method:'POST',headers:{authorization:'Bearer ordinary'},body:{message:'2027년 신년 리포트',sajuProfile:profile,qualityVariant:'newyear-preview',qualityDiagnostics:true}},r);assert.equal(r.code,403);assert.equal(f.calls(),0);assert.equal(r.body.qualityDiagnostics,undefined);});
+
+test('unverified administrator email never grants chat quota or annual pass',async()=>{
+ for(const flag of [undefined,false]){
+  const identity={uid:'member',email:'green092432@gmail.com',email_verified:flag};
+  const f=chatFixture({premium:false,aiFreeUsed:3},undefined,identity),r=res();
+  await f.handler(quotaRequest(),r);assert.notEqual(r.code,200);assert.equal(f.calls(),0);
+  const annual=res();await f.handler({method:'POST',headers:{authorization:'Bearer test'},body:{action:'newyear-report',operation:'generate',profile}},annual);
+  assert.equal(annual.code,403);assert.equal(f.calls(),0);
+ }
+});
+
+test('verified administrator retains annual access without changing ordinary paid access',async()=>{
+ const f=chatFixture({premium:false},undefined,{uid:'member',email:'green092432@gmail.com',email_verified:true}),r=res();
+ await f.handler({method:'POST',headers:{authorization:'Bearer test'},body:{action:'newyear-report',operation:'status'}},r);
+ assert.equal(r.code,200);assert.equal(r.body.access,true);assert.equal(f.calls(),0);
+});
+
+test('repeated failed chat generations are bounded without spending customer questions',async()=>{
+ const f=chatFixture({premium:false,aiFreeUsed:0},'',undefined,async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})}));
+ for(let i=0;i<30;i++){const r=res();await f.handler(quotaRequest(),r);assert.equal(r.code,502);}
+ const r=res();await f.handler(quotaRequest(),r);assert.equal(r.code,429);assert.equal(f.calls(),30);assert.equal(f.rows.get('users/member').aiFreeUsed,0);assert.equal(r.body.usageCharged,false);
+});
+
+test('failed annual generation backs off and hourly attempt cap cannot be reset by retrying',async()=>{
+ const f=serviceFixture(premium,async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})})),first=res();await f.handler({body:{operation:'generate',profile}},first);
+ const second=res();await f.handler({body:{operation:'generate',profile}},second);assert.equal(second.code,429);assert.equal(f.calls(),1);
+ const key='newyearReports/'+reportId('member'),stored=f.rows.get(key);f.rows.set(key,{...stored,failedAt:Date.now()-61000,attemptWindow:Math.floor(Date.now()/3600000),windowAttempts:3});
+ const cap=res();await f.handler({body:{operation:'generate',profile}},cap);assert.equal(cap.code,429);assert.equal(f.calls(),1);
+});
