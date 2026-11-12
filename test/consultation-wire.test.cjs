@@ -42,3 +42,5 @@ test('invented savings amounts are replaced with criteria while personal groundi
 test('capability notices do not imply more birth data unlocks unsupported judgments',()=>{const {b}=prepare();const text=wire.limitations(b,'relationship').join(' ');assert.match(text,/출생시간 제공 여부와 관계없이/);assert.match(text,/출생정보를 알더라도 속마음이나 재회 여부/);});
 
 test('personal savings guard does not replace business partnership decisions',()=>{const bound=require('../lib/consultation-money-criteria').bound;const r=answer({kind:'practical_suggestion',title:'동업',text:'공동 지출 기준',reference_id:null});r.options=[{label:'공동 지출',next_action:'100만원 예시'}];assert.equal(bound(r,{user_statements:[{quote:'두 사람의 동업 역할과 돈 합의'}]},'money'),r);});
+
+test('annual report rejects tentative event predictions and inferred personality claims',()=>{const q=require('../lib/newyear-quality');for(const text of ['2027년에는 이런 상황이 반복될 수 있습니다.','2027년에는 새로운 정보를 받아들이거나 학습이 필요한 상황도 나타날 수 있습니다.','당신의 원국에서 돈 관리의 특성은 경계를 명확히 하는 것입니다.']){const r={overview:text,foundation:'확인',opportunities:'확인',cautions:'확인',closing:'확인',areas:[],months:[]};assert(q.repairTargets(r,{}).length,text);}});
