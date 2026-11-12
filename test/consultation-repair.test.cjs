@@ -19,5 +19,5 @@ test('unrepaired hallucinated money evidence remains rejected after the single b
 test('public failures distinguish timeout, unfinished answers and evidence; logs exclude personal content',()=>{
  const codes=['AI_TIMEOUT','AI_UPSTREAM_ERROR','AI_INCOMPLETE_RESPONSE','AI_EVIDENCE_VALIDATION_FAILED'];assert.equal(new Set(codes.map(publicFailure)).size,4);for(const c of codes)assert.match(publicFailure(c),/차감하지 않았습니다/);
  const log=failureLog({code:'AI_EVIDENCE_VALIDATION_FAILED',message:'private',diagnostics:{structured:{name:'private'},validation_failures:[['MISSING_METHOD']],prompt_version:'v',provider_calls:2}});assert(!JSON.stringify(log).includes('private'));assert.deepEqual(log.validation_failures,[['MISSING_METHOD']]);
- assert.equal(prompt.topic(body.message),'money');assert.match(prompt.OUTPUT,/근거 문단을 억지로 채우지 않는다/);
+ assert.equal(prompt.topic(body.message),'money');assert.match(prompt.OUTPUT,/구독\/고정비 목록만 나열하지 않는다/);
 });
