@@ -29,7 +29,7 @@ test('server binds a source even if the provider returns generic advice; unrelat
 });
 test('valid topical block passes; borrowed evidence and invented ten god fail',()=>{
  const b=bundle();const a=prompt.assemble(b,[],'돈이 새는 부분은?'),assessment=b.topic_assessments[0],r=response();
- r.blocks[0]={kind:'traditional_interpretation',title:'사주 관점',text:rules.paragraph(assessment),person_id:assessment.person_id,evidence:assessment.supporting_fact_ids.map(id=>({id})),candidate_ids:assessment.candidate_ids,assessment_ids:[assessment.id],context_ids:[]};assert.deepEqual(output.validate(r,b,a.memory),[]);
+ r.blocks[0]={kind:'traditional_interpretation',title:'사주 관점',text:'함께 쓰는 돈의 경계라는 관점을 현재의 고민에 연결해 살펴보세요.',person_id:assessment.person_id,evidence:assessment.supporting_fact_ids.map(id=>({id})),candidate_ids:assessment.candidate_ids,assessment_ids:[assessment.id],context_ids:[]};assert.deepEqual(output.validate(r,b,a.memory),[]);
  r.blocks[0].text='정재가 있으니 살펴보세요.';assert(output.validate(r,b,a.memory).includes('UNSUPPORTED_TEN_GOD'));
  r.blocks[0].evidence=[{id:b.charts[0].facts.at(-1).id}];assert(output.validate(r,b,a.memory).includes('ASSESSMENT_WITHOUT_SUPPORT'));
 });
