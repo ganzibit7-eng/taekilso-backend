@@ -31,3 +31,7 @@ test('single source contract prevents combining people and quotes user facts wit
  const {b,a}=prepare();assert.deepEqual(wire.schema(prompt.schema).properties.blocks.items.properties.reference_id,{type:['string','null']});
  const r=wire.materialize(answer({kind:'user_context',title:'말씀하신 상황',text:'비상금 목표가 500만원입니다.',reference_id:'context-current'}),b,a.memory);assert.equal(r.blocks[0].text,'두 사람의 관계');
 });
+
+test('annual narrative rejects speculative opportunities but accepts conditional criteria',()=>{
+ const q=require('../lib/newyear-quality');const r={overview:'새해 초반에 새로운 제안이 생길 가능성이 있습니다.',foundation:'확인',opportunities:'확인',cautions:'확인',closing:'확인',areas:[],months:[]};assert(q.repairTargets(r,{}).some(x=>x.errors.includes('UNSUPPORTED_EVENT_PREDICTION')));r.overview='실제로 새로운 제안이 있다면 비용과 권한을 확인하세요.';assert.equal(q.repairTargets(r,{}).length,0);
+});
