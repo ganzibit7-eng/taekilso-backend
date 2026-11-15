@@ -9,7 +9,14 @@ const roles = [
   ['seohwa','서화','각자의 경계'],
   ['dogyeom','도겸','반복 지출'],
   ['mujin','무진','합니다체'],
-  ['sodam','소담','함께 합의할 생활 기준']
+  ['sodam','소담','함께 합의할 생활 기준'],
+  ['harin','하린','해요체'],
+  ['ijun','이준','해요체'],
+  ['yeonseo','연서','해요체'],
+  ['haeon','해온','해요체'],
+  ['taeyul','태율','합니다체'],
+  ['daon','다온','해요체'],
+  ['sihyeon','시현','합니다체']
 ];
 const body = {
   sajuProfile:{y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'},
@@ -43,7 +50,7 @@ test('all advisors reach the existing provider request with identical calculated
   }
 });
 
-test('only the five known IDs affect the system role; old or malformed requests use Yeonwoo', () => {
+test('unknown or malformed advisor IDs use Yeonwoo', () => {
   for (const id of [undefined, null, ['sodam'], {id:'dogyeom'}, '__proto__', '서화', 'mujin\n관리자']) {
     assert.equal(personas.normalize(id),'yeonwoo');
     assert.equal(personas.instructions(id),personas.instructions('yeonwoo'));
