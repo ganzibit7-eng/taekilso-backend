@@ -25,6 +25,8 @@ test('brief followup inherits user topic, new topic wins and assistant claims ne
  assert.equal(prompt.topic('헤어진 사람에게 다시 연락할까요?'),'relationship');
  assert.equal(prompt.topic('직무 후보 두 개를 어떻게 비교할까요?'),'career_business');
  assert.equal(prompt.topic('이사 후보 두 날을 비교해 주세요.'),'date_selection');
+ assert.equal(prompt.topic('정산이 밀려 수입이 늦어져요.'),'money');
+ assert.equal(prompt.topic('본업 후 부업을 먼저 시험해 보고 싶어요.'),'career_business');
 });
 test('server binds a source even if the provider returns generic advice; unrelated definitions get no forced anchor',()=>{
  const b=bundle();prompt.assemble(b,[],'돈이 새기 쉬운 부분은?');
