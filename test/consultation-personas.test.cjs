@@ -16,7 +16,18 @@ const roles = [
   ['haeon','해온','일단 공고에서 가장 끌린 문장 하나만 골라요. 면접에서는 그게 입사 첫 주에 무슨 일인지 물어봐요.','좋아요, 같이 봐요.'],
   ['taeyul','태율','간판부터 만들 건 없쥬. 만들고 싶은 것 하나만 들고 가서 누가 왜 찾는지 먼저 들어봐유.','잘 오셨어유.'],
   ['daon','다온','식사 골랐는데 무료 배달까지 얼마 남았다는 문구가 뜨잖아요. 딱 그때, 더 담기 전에 멈춰보는 거예요.','편하게 얘기해 봐요.'],
-  ['sihyeon','시현','성과를 맡는 자리라면 일정과 우선순위도 내가 정할 수 있는지부터 확인하세요.','만나서 반가워요.']
+  ['sihyeon','시현','성과를 맡는 자리라면 일정과 우선순위도 내가 정할 수 있는지부터 확인하세요.','만나서 반가워요.'],
+  ['yeoul','여울','오늘 다 할 일을 정하기 전에, 책을 펴면 맨 처음 할 일부터 골라봐요.','잘 오셨어요, 같이 시작해요.'],
+  ['seojin','서진','틀린 이유가 다르면 다시 푸는 방법도 달라요. 어디에서 멈췄는지부터 보죠.','준비하신 이야기부터 들어볼게요.'],
+  ['yunseul','윤슬','전공 이름을 잠깐 가리고 과제 예시 두 개만 나란히 봐요. 어디에 먼저 손이 가나요?','어떤 배움이 끌리는지 같이 봐요.'],
+  ['jian','지안','강의를 잠깐 꺼봐요. 처음 막히는 동작 하나가 다음에 배울 내용이에요.','어디에서 손이 멈췄는지 볼까요?'],
+  ['moeun','모은','처음 사는 물건보다 매달 나가는 돈을 먼저 적어보세요. 나머지 살림은 하루를 지내보면 보여요.','첫 살림 이야기부터 들려주세요.'],
+  ['yisol','이솔','일정 보고 저녁에 다시 말해줄게요. 이 한 문장이 서로를 도울 범위를 생각할 시간을 줘요.','묵혀둔 마음을 차근차근 볼까요?'],
+  ['yuhyeon','유현','언제 쉴지 고민되면 퇴근 전에 무엇을 넘기고 갈지부터 정해봐요.','하루 끝에 남은 일부터 볼까요?'],
+  ['soyul','소율','모임이 힘들었던 건 사람이 아니라 그날 맡은 역할 때문일 수도 있어요. 그 자리부터 떠올려봐요.','편하게 만날 수 있는 자리부터 볼까요?'],
+  ['damwon','담원','집을 다시 보러 간다면 퇴근하는 시간에 한 번 걸어보세요. 사진에는 안 잡힌 조건이 그때 보여요.','어떤 하루를 옮기고 싶은지 같이 봐요.'],
+  ['giyun','기윤','문 열고 처음 들어온 사람이 뭐라고 물을까요? 그 질문에 답할 수 있는 준비부터 해봐요.','문을 열기 전 준비를 하나씩 볼까요?'],
+  ['jeongon','정온','시작일만 보지 말고, 일이 늘어났을 때 누구와 다시 정할지도 물어보세요.','적혀 있는 약속부터 차분히 봐요.']
 ];
 const body = {
   sajuProfile:{y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'},
@@ -64,6 +75,23 @@ test('unknown or malformed advisor IDs use Yeonwoo', () => {
   }
   assert.equal(prompt.topic('결혼 전에 어떤 이야기를 나누면 좋을까요?'),'relationship');
   assert.equal(prompt.topic('결혼 택일 기준이 궁금해요.'),'date_selection');
+});
+
+test('new specialists use their topic for open-ended first turns and respect explicit changes',()=>{
+  const calculation=require('../lib/consultation-calculation');
+  function resolve(consultant,message){
+    const bundle=calculation.build({...body,message},new Date('2026-11-17T04:00:00Z'));
+    const assembled=prompt.assemble(bundle,[],message,consultant);
+    assert.ok(bundle.topic_assessments.length,consultant);
+    return assembled.topic;
+  }
+  assert.equal(resolve('yeoul','첫 단계를 어디서 시작할까요?'),'study');
+  assert.equal(resolve('yunseul','제게 맞는 전공을 찾고 싶어요.'),'study');
+  assert.equal(resolve('damwon','이사 후 생활이 달라질까 걱정이에요.'),'life_transition');
+  assert.equal(resolve('moeun','생활비를 어떻게 나눌까요?'),'money');
+  assert.equal(resolve('soyul','새 모임에 가는데 첫인사가 어렵네요.'),'relationship');
+  assert.equal(resolve('giyun','처음에는 무엇부터 준비하면 좋을까요?'),'career_business');
+  assert.equal(resolve('damwon','시험 공부부터 시작하고 싶어요.'),'study');
 });
 
 test('distinct openers appear once, while follow-ups and clarifications begin directly', async () => {
