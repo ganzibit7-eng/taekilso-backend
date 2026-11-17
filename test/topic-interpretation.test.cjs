@@ -22,6 +22,9 @@ test('same chart has distinct money/work/love/study lenses, not fabricated domin
 test('brief followup inherits user topic, new topic wins and assistant claims never classify it',()=>{
  const h=[{role:'user',content:'연애 관계가 고민이에요'},{role:'assistant',content:'돈을 써야해요'}];
  assert.equal(prompt.resolveTopic('그럼 어떤 기준으로 대화할까요?',h),'relationship');assert.equal(prompt.resolveTopic('공부하는 방법이 궁금해요',h),'study');assert.equal(prompt.resolveTopic('돈이 새는 곳은?',h),'money');
+ assert.equal(prompt.topic('헤어진 사람에게 다시 연락할까요?'),'relationship');
+ assert.equal(prompt.topic('직무 후보 두 개를 어떻게 비교할까요?'),'career_business');
+ assert.equal(prompt.topic('이사 후보 두 날을 비교해 주세요.'),'date_selection');
 });
 test('server binds a source even if the provider returns generic advice; unrelated definitions get no forced anchor',()=>{
  const b=bundle();prompt.assemble(b,[],'돈이 새기 쉬운 부분은?');
