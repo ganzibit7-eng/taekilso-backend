@@ -29,10 +29,10 @@ test('annual provider receives actual calendar context and returns its own sourc
  assert.equal(supplied.calculationVersion,result.bundle.version);assert(supplied.method.interpretation.includes('전문가가 검수한 길흉·사건 예측 규칙이 아니며'));
  assert.deepEqual(supplied.natal_topic_lenses.map(x=>x.topic),['career_business','money','relationship']);
  assert(supplied.natal_topic_lenses.every(x=>x.interpretations.length&&x.interpretations.every(a=>a.meaning&&a.conditional_reading)));
- assert(result.report.areas.slice(0,3).every(a=>a.reading.includes('월간에서 비견이 계산')));
+ assert(result.report.calculationNotes.areas.slice(0,3).every(note=>note.includes('월간에서 비견이 계산')));
  for(const g of result.report.grounding.filter(g=>g.section.startsWith('areas.')))assert(result.bundle.charts[0].facts.some(f=>f.id===g.id));
- assert(result.report.foundation.includes('丙寅'));assert(result.report.foundation.includes('겁재'));
- assert.equal(result.report.months[0].theme,[...new Set(supplied.months[0].segments.map(s=>s.comparison.reviewLens.theme))].join(' / '));
+ assert(!result.report.foundation.includes('丙寅'));assert(result.report.calculationNotes.foundation.includes('丙寅'));assert(result.report.calculationNotes.foundation.includes('겁재'));
+ assert.equal(result.report.months[0].theme,'점검 주제');assert(result.report.months[0].calculationNote.includes(supplied.source_checks_expected.months[0].monthGanZhi[0]));
  assert.equal(result.diagnostics.estimated_usd,.0011);
 });
 
