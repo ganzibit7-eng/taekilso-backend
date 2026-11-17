@@ -105,11 +105,13 @@ test('the advisor voice can carry into plain paragraphs without rewriting quoted
     headline:'정산일 확인하기',status:'answer',options:[],actions:[],data_limitations:[],
     blocks:[
       {kind:'practical_suggestion',title:'정산 일정',text:'내가 먼저 부담할 비용을 확인해 보세요.'},
-      {kind:'practical_suggestion',title:'상대방에게 보낼 문장',text:'“정산 일정을 확인하려고 합니다. 언제쯤 입금될까요?”'}
+      {kind:'practical_suggestion',title:'상대방에게 보낼 문장',text:'이렇게 먼저 말해 보세요. “정산 일정을 확인하려고 합니다. 언제쯤 입금될까요?” 이렇게 쓰면 수월해져요.'}
     ]
   },{charts:[],date_candidates:[]},'','taeyul');
   assert.match(rendered,/확인해 봐유/);
+  assert.match(rendered,/이렇게 먼저 말해 봐유\./);
   assert.match(rendered,/“정산 일정을 확인하려고 해요\. 언제쯤 입금될까요\?”/);
+  assert.match(rendered,/수월해져유\./);
 });
 
 test('mixed production prose uses the same regional register from sentence to sentence', () => {
@@ -118,6 +120,8 @@ test('mixed production prose uses the same regional register from sentence to se
   const taeyul=personas.spokenProse('taeyul');
   assert.match(taeyul(first),/있어유\. .*뜻이에유\.$/);
   assert.match(taeyul(second),/봐유\. .*있어유\. .*비교해 봐유\.$/);
+  assert.equal(taeyul('훨씬 수월해져요. 먼저 확인하고요. 더 알아보셔도 되어유.'),'훨씬 수월해져유. 먼저 확인하고유. 더 알아보셔도 돼유.');
+  assert.equal(taeyul('시장 수요. 필요한 준비 개요. 앞으로 정할 것들.'),'시장 수요. 필요한 준비 개요. 앞으로 정할 것들.');
   assert.equal(taeyul('하나씩 나눕니다. 평가를 비교하십시오. 이게 첫 단계입니다.'),'하나씩 나눠유. 평가를 비교해유. 이게 첫 단계예유.');
   const yeonseo=personas.spokenProse('yeonseo');
   assert.equal(yeonseo('둘이 합의할 일이 있습니다. 평일에 누가 할지 물어보세요.'),'둘이 합의할 일이 있어예. 평일에 누가 할지 물어봐예.');
