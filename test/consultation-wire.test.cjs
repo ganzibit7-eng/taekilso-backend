@@ -44,13 +44,23 @@ test('annual narrative rejects speculative opportunities but accepts conditional
 test('ordinary Korean suffixes do not count as ten-god names',()=>{const {b,a}=prepare();const raw=answer({kind:'traditional_interpretation',title:'기준',text:'결정인 만큼 예정인 비용을 확인해 보세요.',reference_id:b.topic_assessments[0].id});raw.follow_up_question='지출이 있을 예정인가요?';assert.deepEqual(output.validate(wire.materialize(raw,b),b,a.memory),[]);});
 test('invented savings amounts are replaced with criteria while personal grounding is preserved',()=>{const bound=require('../lib/consultation-money-criteria').bound;const {b,a}=prepare();const r=wire.materialize(answer({kind:'traditional_interpretation',title:'돈의 경계',text:'부탁을 받았다면 합의한 몫을 확인해 보세요.',reference_id:b.topic_assessments[0].id}),b);r.options=[{label:'월 70만원 저축',suitable_when:'3개월 준비',tradeoff:'비상금 500만원으로 충분합니다.',next_action:'실행하세요.'}];const fixed=bound(r,{user_statements:[{quote:'현재 비상금 500만원'}]},'money');assert.equal(fixed.blocks[0],r.blocks[0]);assert(!JSON.stringify(fixed).includes('70만원'));assert.match(fixed.blocks.at(-1).text,/현재 보유한 비상금/);assert.equal(bound(r,a.memory,'relationship'),r);});
 
-test('plain limitation text still preserves unknown birth-time and relationship boundaries',()=>{
- const {b}=prepare(), text=wire.limitations(b,'relationship').join(' ');
+test('plain limitation text reports actual birth-time restrictions without a generic topic disclaimer',()=>{
+ const {b}=prepare(), text=wire.limitations(b).join(' ');
  assert.match(text,/태어난 시간을 모르는 경우/);
- assert.match(text,/속마음이나 재회 여부는 출생정보만으로 알 수 없어요/);
- assert.doesNotMatch(text,/시주|용신|격국/);
+ assert.doesNotMatch(text,/시주|용신|격국|재회|지출/);
  assert.match(service.capabilityNotice('제 용신과 격국을 알려주세요'),/태어난 시간을 알려주셔도 이 범위는 같아요/);
  assert.equal(service.capabilityNotice('격국의 뜻은 뭔가요?'),null);
+});
+
+test('a complete answer does not echo the user or ask them to come back with records',()=>{
+ const {b,a}=prepare(), source=b.topic_assessments[0];
+ const raw=answer({kind:'traditional_interpretation',title:'사주로 보는 대화',text:'두 사람의 연락 기준이 다르다면 먼저 지킬 수 있는 약속을 하나 정해 보세요.',reference_id:source.id});
+ raw.blocks.push({kind:'user_context',title:'질문 다시 보기',text:'모델이 적은 문장',reference_id:'context-current'});
+ raw.follow_up_question='한 주일 기록한 뒤 알려줄 수 있어요?';
+ const result=wire.materialize(raw,b,a.memory);
+ assert.doesNotMatch(output.render(result,b),/질문 다시 보기|두 사람의 관계|한 주일 기록/);
+ result.status='needs_clarification';
+ assert.match(output.render(result,b),/한 주일 기록/);
 });
 
 test('personal savings guard does not replace business partnership decisions',()=>{const bound=require('../lib/consultation-money-criteria').bound;const r=answer({kind:'practical_suggestion',title:'동업',text:'공동 지출 기준',reference_id:null});r.options=[{label:'공동 지출',next_action:'100만원 예시'}];assert.equal(bound(r,{user_statements:[{quote:'두 사람의 동업 역할과 돈 합의'}]},'money'),r);});
