@@ -43,7 +43,10 @@ test('all advisors reach the provider with distinct examples and the same data a
         assert.match(system, /더 그려볼 장면은 '만약'이나 '예를 들어'로 표시/);
         assert.match(system,/\[현재 주제 모듈\]\n연애·가족·궁합/);
         assert.equal(rest.model,'same-model');
-        const common = {system:system.slice(boundary), ...rest};
+        const reminderAt=system.lastIndexOf('\n\n[현재 상담사의 말투]');
+        assert.ok(reminderAt>boundary);
+        assert.equal(system.slice(reminderAt+2),personas.voiceReminder(consultantId));
+        const common = {system:system.slice(boundary,reminderAt), ...rest};
         if (!shared) shared = common;
         else assert.deepEqual(common,shared);
         return {ok:false};
@@ -81,6 +84,20 @@ test('distinct openers appear once, while follow-ups and clarifications begin di
   for(const [id,,,greeting] of roles) {
     assert.ok((await ask(id,[])).reply.startsWith(greeting+' 부담을'));
   }
-  assert.match((await ask('dogyeom',body.history)).reply,/^부담을/);
+  const continued=await ask('dogyeom',body.history);
+  assert.match(continued.reply,/^부담을/);
+  assert.match(continued.reply,/약속을 하나 골라보시오/);
   assert.match((await ask('mujin',[],'needs_clarification')).reply,/^부담을/);
+});
+
+test('the advisor voice can carry into plain paragraphs without rewriting quoted dialogue', () => {
+  const text='이번에 쓸 수 있는 돈부터 적어 보세요. “이 비용은 확인해 보세요.”라고 물어보세요.';
+  const write=(id,paragraphs=[text])=>personas.spokenProse(id,paragraphs)(paragraphs[0]);
+  assert.match(write('dogyeom'),/^이번에 쓸 수 있는 돈부터 적어 보시오\. “이 비용은 확인해 보세요\.”라고 물어보시오\.$/);
+  assert.match(write('mujin'),/적어 보시지요/);
+  assert.match(write('taeyul'),/적어 봐유/);
+  assert.match(write('yeonseo'),/적어 보이소/);
+  assert.equal(write('sihyeon'),text);
+  const dialect='작게 시작해 봐유. 살펴보세요.';
+  assert.equal(write('taeyul',[dialect]),dialect);
 });
