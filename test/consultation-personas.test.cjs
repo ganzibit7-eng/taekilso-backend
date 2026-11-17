@@ -5,18 +5,18 @@ const prompt = require('../lib/consultation-prompt');
 const service = require('../lib/consultation-service');
 
 const roles = [
-  ['yeonwoo','연우','다음 선택'],
-  ['seohwa','서화','각자의 경계'],
-  ['dogyeom','도겸','반복 지출'],
-  ['mujin','무진','합니다체'],
-  ['sodam','소담','함께 합의할 생활 기준'],
-  ['harin','하린','해요체'],
-  ['ijun','이준','해요체'],
-  ['yeonseo','연서','해요체'],
-  ['haeon','해온','해요체'],
-  ['taeyul','태율','합니다체'],
-  ['daon','다온','해요체'],
-  ['sihyeon','시현','합니다체']
+  ['yeonwoo','연우','지금 풀 수 있는 매듭부터 하나씩 볼까요?'],
+  ['seohwa','서화','먼저, 그 말이 마음에 걸렸던 순간부터 같이 봐요.'],
+  ['dogyeom','도겸','일은 더 받았는데 손에 남는 돈은 늦게 들어오나요? 그 간격부터 봐요.'],
+  ['mujin','무진','두 회사 모두 월요일 아침에 어떤 결정을 맡기는지 물어보십시오.'],
+  ['sodam','소담','식장 달력을 보기 전에 두 분에게 빠지면 아쉬운 사람이 누군지부터 적어볼까요?'],
+  ['harin','하린','대화가 즐거웠다면, 말이 끊긴 순간에도 편했는지 한번 떠올려 봐요.'],
+  ['ijun','이준','보내려던 문장을 한 번만 소리 없이 읽어봐요. 사과하고 싶은 건지, 답을 받고 싶은 건지요.'],
+  ['yeonseo','연서','둘 다 지친 저녁에 밥과 설거지는 어떻게 나누고 싶나요? 그 얘기부터 꺼내봐요.'],
+  ['haeon','해온','이 공고대로라면 첫 주에 어떤 일을 혼자 맡게 되는지 물어봐요.'],
+  ['taeyul','태율','가게 간판부터 달 필요는 없습니다. 무엇에 돈을 낼 사람인지 먼저 만나봅시다.'],
+  ['daon','다온','야근 날이라면 결제 버튼을 누르는 순간보다, 퇴근길에 이미 지쳐 있었는지부터 봐요.'],
+  ['sihyeon','시현','제가 끝까지 책임질 일이라면, 어디까지 제가 결정할 수 있습니까? 이 질문부터 하십시오.']
 ];
 const body = {
   sajuProfile:{y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'},
@@ -24,7 +24,7 @@ const body = {
   history:[{role:'assistant',content:'이전 기록의 이름은 연우입니다.'}]
 };
 
-test('all advisors reach the existing provider request with identical calculated data, scope and output contract', async () => {
+test('all advisors reach the provider with distinct examples and the same data and answer policy', async () => {
   let shared;
   for (const [consultantId, name, style] of roles) {
     let calls = 0;
@@ -37,7 +37,9 @@ test('all advisors reach the existing provider request with identical calculated
         const {system, ...rest} = JSON.parse(request.body);
         const boundary = system.indexOf('\n\n');
         assert.ok(system.slice(0,boundary).includes('AI 사주 상담사 '+name));
-        assert.ok(system.slice(0,boundary).includes(style));
+        assert.ok(system.slice(0,boundary).includes('말투 예시: “'+style+'”'));
+        assert.match(system.slice(0,boundary),/같은 첫 문장을 반복하거나/);
+        assert.match(system, /독자가 오행이나 한자를 알아야 이해할 문장은 쓰지 않는다/);
         assert.match(system,/\[현재 주제 모듈\]\n연애·가족·궁합/);
         assert.equal(rest.model,'same-model');
         const common = {system:system.slice(boundary), ...rest};

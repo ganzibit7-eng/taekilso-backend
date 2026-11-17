@@ -17,14 +17,17 @@ test('each topic uses actual natal ten gods with traceable person/candidate and 
 });
 test('same chart has distinct money/work/love/study lenses, not fabricated dominant stars',()=>{
  const b=bundle(),texts=Object.keys(rules.LENSES).map(t=>rules.select(b,t).map(rules.paragraph).join(' '));assert.equal(new Set(texts).size,texts.length);
- for(const text of texts){assert.match(text,/계산되어/);assert(!/돈을 잃|반드시|타고난|신강|신약/.test(text));}
+ for(const text of texts){assert.match(text,/살펴|확인|비교/);assert(!/돈을 잃|반드시|타고난|신강|신약|계산되어|지장간/.test(text));}
 });
 test('brief followup inherits user topic, new topic wins and assistant claims never classify it',()=>{
  const h=[{role:'user',content:'연애 관계가 고민이에요'},{role:'assistant',content:'돈을 써야해요'}];
  assert.equal(prompt.resolveTopic('그럼 어떤 기준으로 대화할까요?',h),'relationship');assert.equal(prompt.resolveTopic('공부하는 방법이 궁금해요',h),'study');assert.equal(prompt.resolveTopic('돈이 새는 곳은?',h),'money');
 });
 test('server binds a source even if the provider returns generic advice; unrelated definitions get no forced anchor',()=>{
- const b=bundle();prompt.assemble(b,[],'돈이 새기 쉬운 부분은?');assert.match(output.render(response(),b),/월간에서 비견이 계산/);assert(output.reasons(response(),b).length);
+ const b=bundle();prompt.assemble(b,[],'돈이 새기 쉬운 부분은?');
+ const text=output.render(response(),b);
+ assert.match(text,/함께 쓰는 돈에서 내 몫과 상대 몫의 경계/);assert.doesNotMatch(text,/월간|비견|오행/);
+ assert(output.reasons(response(),b).some(row=>row.label==='월간 · 비견'));
  const concept=bundle();prompt.assemble(concept,[],'재물에서 정재의 뜻은?');assert.deepEqual(concept.topic_assessments,[]);
 });
 test('valid topical block passes; borrowed evidence and invented ten god fail',()=>{

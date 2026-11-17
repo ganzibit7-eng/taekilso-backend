@@ -50,7 +50,13 @@ test('valid date references cannot be used to swap scores and rendering preserve
  assert(out.validate(a,b,prompt.memory([],body.message)).includes('DATE_SCORE_SERVER_ONLY'));
  a.blocks[0].text='예약 가능 여부와 이사 비용은 실제 견적을 확인해야 합니다.';
  assert.deepEqual(out.validate(a,b,prompt.memory([],body.message)),[]);
- const rendered=out.render(a,b);for(const d of [one,two])assert(rendered.includes(`${d.value.date} · ${d.value.ganZhi} · ${d.value.score}점`));
+ const rendered=out.render(a,b),details=out.reasons(a,b);
+ for(const d of [one,two]){
+  assert(rendered.includes(`${d.value.date} · ${d.value.score}점`));
+  assert(!rendered.includes(d.value.ganZhi));
+  const row=details.find(item=>item.label===d.value.date+' · '+d.value.event);
+  assert.equal(row.value,[d.value.ganZhi,d.value.score+'점',...d.value.reasons].join(' · '));
+ }
  a.blocks[0].title='후보 99점';assert(out.validate(a,b,prompt.memory([],body.message)).includes('DATE_SCORE_SERVER_ONLY'));
  a.blocks[0].title='후보 비교';a.data_limitations=['후보는 99점'];assert(out.validate(a,b,prompt.memory([],body.message)).includes('UNGROUNDED_SCORE_COMPARISON'));
 });
