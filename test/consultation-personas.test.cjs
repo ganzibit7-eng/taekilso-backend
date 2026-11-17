@@ -75,7 +75,7 @@ test('distinct openers appear once, while follow-ups and clarifications begin di
       fetchImpl:async()=>({ok:true,json:async()=>({
         stop_reason:'tool_use',content:[{type:'tool_use',name:'write_consultation',input:{
           status,headline:'부담을 느끼는 장면부터 떠올려 보세요.',
-          blocks:[{kind:'practical_suggestion',title:'꺼낼 말',text:'서로 지킬 수 있는 약속을 하나 골라보세요.',reference_id:null}],
+          blocks:[{kind:'practical_suggestion',title:'나눌 약속',text:'서로 지킬 수 있는 약속을 하나 골라보세요.',reference_id:null}],
           options:[],actions:[],follow_up_question:null,data_limitations:[]
         }}]
       })})
@@ -100,4 +100,14 @@ test('the advisor voice can carry into plain paragraphs without rewriting quoted
   assert.equal(write('sihyeon'),text);
   const dialect='작게 시작해 봐유. 살펴보세요.';
   assert.equal(write('taeyul',[dialect]),dialect);
+  const output=require('../lib/consultation-output');
+  const rendered=output.render({
+    headline:'정산일 확인하기',status:'answer',options:[],actions:[],data_limitations:[],
+    blocks:[
+      {kind:'practical_suggestion',title:'정산 일정',text:'내가 먼저 부담할 비용을 확인해 보세요.'},
+      {kind:'practical_suggestion',title:'상대방에게 보낼 문장',text:'정산 일정을 확인하려고 합니다. 언제쯤 입금될까요?'}
+    ]
+  },{charts:[],date_candidates:[]},'','dogyeom');
+  assert.match(rendered,/확인해 보시오/);
+  assert.match(rendered,/정산 일정을 확인하려고 합니다\./);
 });
