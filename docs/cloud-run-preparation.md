@@ -16,9 +16,12 @@ Adding another proxy/load balancer requires reviewing that trust boundary.
 
 The Dockerfile uses Node 26, the existing lockfile, a non-root runtime, and an
 explicit source allowlist. Tests, `.git`, local environments and documentation
-are excluded from the build context. A Docker engine is unavailable locally:
-the image has **not** been built or started. The transport and existing test
-suite pass on local Node 24; Node 26/container verification remains a release gate.
+are excluded from the build context. A Docker engine is unavailable locally,
+so the public repository's standard Linux CI was used instead. It passed all
+148 tests on Node 26, built the image, started it without provider credentials,
+and verified the health endpoint. [Successful container verification](https://github.com/ganzibit7-eng/taekilso-backend/actions/runs/44241600372).
+No image was pushed to a paid registry. Real Cloud Run ingress, concurrent AI
+requests and billing configuration remain release gates.
 
 ## Proposed initial service configuration, subject to cost approval
 
