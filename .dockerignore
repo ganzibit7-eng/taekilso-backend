@@ -3,6 +3,7 @@
 !package.json
 !package-lock.json
 !server.cjs
+!runtime-auth.cjs
 !api/
 !api/**
 !lib/

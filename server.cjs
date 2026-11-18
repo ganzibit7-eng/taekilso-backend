@@ -36,7 +36,11 @@ function sanitizeProxyHeaders(request){
  const last=String(request.headers['x-forwarded-for']||'').split(',').at(-1).trim();
  if(net.isIP(last))request.headers['x-forwarded-for']=last;else delete request.headers['x-forwarded-for'];
 }
-function createServer({loadHandler=name=>require('./api/'+name+'.js'),maxBodyBytes=MAX_BODY_BYTES}={}){
+function loadProductionHandler(name){
+ require('./runtime-auth.cjs').initializeRuntimeAuth();
+ return require('./api/'+name+'.js');
+}
+function createServer({loadHandler=loadProductionHandler,maxBodyBytes=MAX_BODY_BYTES}={}){
  const allowed=new Set(ROUTES);
  const server=http.createServer(async(request,rawResponse)=>{
   const response=decorate(rawResponse);response.setHeader('Cache-Control','no-store');response.setHeader('X-Content-Type-Options','nosniff');
