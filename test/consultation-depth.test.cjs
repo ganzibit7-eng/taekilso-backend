@@ -1,0 +1,21 @@
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const prompt=require('../lib/consultation-prompt'),calc=require('../lib/consultation-calculation');
+test('personal concerns get full readings, explicit detail grows, explicit brevity remains available',()=>{
+ assert.equal(prompt.responseLength('재물운은 어떤가요?',[]).mode,'standard');
+ assert.equal(prompt.responseLength('간단히 말고 자세히 풀이해주세요',[]).mode,'detailed');
+ assert.equal(prompt.responseLength('짧게 핵심만 알려주세요',[]).mode,'brief');
+ assert.equal(prompt.responseLength('비견이 무슨 뜻인가요?',[]).mode,'concept');
+});
+test('followups explain the new question while a topic change receives a full first reading',()=>{
+ const history=[{role:'user',content:'재물과 소비가 궁금해요'},{role:'assistant',content:'앞선 풀이'}];
+ assert.equal(prompt.responseLength('그럼 같이 쓰는 돈은요?',history).mode,'followup');
+ assert.equal(prompt.responseLength('이번에는 연애를 봐주세요',history).mode,'standard');
+ assert.equal(prompt.responseLength('그 부분을 상세하게 알려줘요',history).mode,'detailed');
+});
+test('length instructions preserve unsupported-data boundaries, persona and one selected topic',()=>{
+ const body={sajuProfile:{y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'},message:'이직할 때 제 사주에서 어떤 선택이 잘 맞나요?'};
+ const assembled=prompt.assemble(calc.build(body),[],body.message,'taeyul');
+ assert.match(assembled.system,/1200~1800자/);assert.match(assembled.system,/자료가 부족하거나 답을 제한해야 하는 질문/);assert.match(assembled.system,/잘 오셨|충청/);
+ assert.doesNotMatch(prompt.OUTPUT,/2~3개 짧은 문단이면 충분|후속 질문은 한 문단/);
+ assert.equal(assembled.topic,'career_business');
+});
