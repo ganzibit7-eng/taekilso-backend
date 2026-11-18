@@ -25,3 +25,15 @@ test('caller-controlled Vercel IP header cannot replace the final managed ingres
  const r=await fetch(base+'/api/admin-report',{headers:{'x-vercel-forwarded-for':'1.1.1.1','x-forwarded-for':'9.9.9.9, 192.0.2.10'}});
  assert.deepEqual(await r.json(),{forwarded:'192.0.2.10'});
 },{loadHandler:()=>(req,res)=>res.json({vercel:req.headers['x-vercel-forwarded-for'],forwarded:req.headers['x-forwarded-for']})}));
+
+test('overlapping consultation requests retain their own member token, profile and response',()=>withServer(async base=>{
+ const calls=Array.from({length:30},(_,index)=>({index,authorization:'Bearer synthetic-member-'+index,profile:'synthetic-profile-'+index}));
+ const replies=await Promise.all(calls.map(async call=>{
+  const response=await fetch(base+'/api/ai-chat',{method:'POST',headers:{authorization:call.authorization,'content-type':'application/json'},body:JSON.stringify({index:call.index,profile:call.profile})});
+  assert.equal(response.status,200);return response.json();
+ }));
+ for(const call of calls)assert.deepEqual(replies[call.index],call);
+},{loadHandler:()=>async(req,res)=>{
+ await new Promise(resolve=>setTimeout(resolve,(29-req.body.index)%10));
+ res.json({index:req.body.index,authorization:req.headers.authorization,profile:req.body.profile});
+}}));

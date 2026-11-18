@@ -46,6 +46,29 @@ subscription. A billing-enabled Google Cloud account is required; compute beyond
 the allowance, network traffic, builds and artifact storage can incur charges.
 Do not enable billing or deploy paid resources without explicit approval.
 
+### Approval and live-account check — 2026-11-18
+
+The operator explicitly approved Cloud Run usage-based billing and requested
+cost notifications. The remaining blocker is account activation, not approval:
+the linked billing account is closed, project `billingEnabled` is false, and
+Google's console disables reopening it because it is not in good standing.
+No active billing account was returned for the signed-in operator. The console
+also disables creation of budgets. No Cloud Run service or billing alert has
+been created, and production API URLs remain on Vercel.
+
+After the operator resolves the account status, first create a monthly
+alerts-only budget of KRW 10,000 scoped to this project across all Google Cloud
+services. Notify the billing-account administrators/users at 50%, 90% and 100%
+actual spend and at 100% forecast spend. Preserve any existing alert settings.
+This budget is a notification threshold, not an automatic service shutdown or
+guaranteed spending cap. External Claude API costs are outside this budget.
+
+Retain the conservative two-instance limit and disable startup CPU boost for the
+initial request-based service. Observe memory use and real request concurrency
+before increasing resources. The adapter's additional overlapping-request check
+covers 30 distinct synthetic tokens/profiles without provider calls; it does not
+replace real Cloud Run authentication, payment and AI verification.
+
 Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
 [request timeout](https://docs.cloud.google.com/run/docs/configuring/request-timeout),
 [container runtime contract](https://docs.cloud.google.com/run/docs/container-contract).
