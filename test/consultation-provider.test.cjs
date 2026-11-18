@@ -6,6 +6,15 @@ const payload={model:'claude-haiku-4-5-20251001',max_tokens:2400,system:'source-
 const options=()=>({headers:{'x-api-key':'synthetic-fallback'},body:JSON.stringify(payload),signal:AbortSignal.timeout(1000)});
 const raw=(input={},name='write_consultation')=>({status:'completed',model:provider.MODEL,usage:{input_tokens:100,output_tokens:200},output:[{type:'function_call',name,call_id:'call-1',arguments:JSON.stringify(input)}]});
 const response=data=>({ok:true,status:200,json:async()=>data});
+test('API cost distinguishes cache reads and writes, includes reasoning once and fails unknown tiers closed',()=>{
+ const usage={input_tokens:1000,input_tokens_details:{cached_tokens:300,cache_write_tokens:200},output_tokens:400,output_tokens_details:{reasoning_tokens:100}};
+ const d=provider.pricing('openai',usage);assert.equal(d.uncached_input_tokens,500);assert.equal(d.reasoning_tokens,100);
+ assert.equal(d.estimated_usd,(500*2+300*.1+200*2.5+400*10)/1e6);
+ assert.equal(provider.estimate('openai',usage,'priority'),null);
+ assert.equal(provider.estimate('openai',{...usage,input_tokens:100}),null);
+ assert.equal(provider.estimate('openai',{input_tokens:1,output_tokens:-1}),null);
+ const long=provider.pricing('openai',{input_tokens:300000,output_tokens:1000});assert.equal(long.estimated_usd,1.215);
+});
 test('GPT primary uses forced strict tool, no provider storage, no browser-selected model, and never calls Claude on success',async()=>{
  let calls=0;const p=provider.create({env,fetchImpl:async(url,o)=>{calls++;assert.equal(url,'https://api.openai.com/v1/responses');const b=JSON.parse(o.body);assert.equal(b.model,provider.MODEL);assert.equal(b.store,false);assert.equal(b.max_output_tokens,2400);assert.equal(b.reasoning.effort,'low');assert.equal(b.tools[0].strict,true);assert.equal(o.headers['x-api-key'],undefined);return response(raw());}});
  assert.equal((await(await p.fetch('claude-url',options())).json()).stop_reason,'tool_use');assert.equal(calls,1);
@@ -47,7 +56,7 @@ test('GPT output uses actual source binding and the existing persona renderer; i
  const body={sajuProfile:{y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'},message:'사업과 부업 중 어떤 방식을 먼저 시도할까요?'};
  const b=calc.build(body);prompt.assemble(b,[],body.message,'taeyul');let calls=0;
  const answer={status:'answer',headline:'먼저 작은 제안부터 시험해요.',blocks:[{kind:'traditional_interpretation',title:'내가 정할 범위',text:'주도할 수 있는 일이 있다면, 책임질 범위도 함께 정해 보세요.',reference_id:b.topic_assessments[0].id}],options:[],actions:[],follow_up_question:null,data_limitations:[]};
- const result=await service.generate({body,messages:[{role:'user',content:body.message}],key:'fallback',model:payload.model,consultantId:'taeyul',providerEnv:env,fetchImpl:async()=>{calls++;return response(raw(answer));}});
+ const result=await service.generate({body,messages:[{role:'user',content:body.message}],key:'fallback',model:payload.model,consultantId:'taeyul',providerEnv:env,fetchImpl:async(_url,o)=>{calls++;assert.equal(JSON.parse(o.body).max_output_tokens,4800);return response(raw(answer));}});
  assert.equal(calls,1);assert(result.evidence.length);assert.match(result.reply,/유|쥬/);assert.doesNotMatch(result.reply,/입니다|합니다/);assert.equal(result.diagnostics.selected_provider,'openai');
  answer.blocks[0].reference_id='invented-source';calls=0;await assert.rejects(service.generate({body,messages:[{role:'user',content:body.message}],key:'fallback',model:payload.model,providerEnv:env,fetchImpl:async()=>{calls++;return response(raw(answer));}}),{code:'AI_EVIDENCE_VALIDATION_FAILED'});assert.equal(calls,2);
 });
