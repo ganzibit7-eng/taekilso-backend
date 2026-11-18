@@ -1,0 +1,31 @@
+name: Verify portable API container
+on:
+  push:
+    branches: [codex/cloudrun-preparation]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node --test test/*.test.cjs
+      - run: docker build --tag taekilso-cloudrun:check .
+      - run: docker run --detach --name taekilso-cloudrun-check --publish 127.0.0.1:8080:8080 taekilso-cloudrun:check
+      - name: Check container health without provider credentials
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8080/healthz; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - run: docker exec taekilso-cloudrun-check node --version
+      - if: always()
+        run: docker rm --force taekilso-cloudrun-check || true
