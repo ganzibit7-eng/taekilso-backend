@@ -22,7 +22,7 @@ jobs:
       - name: Check container health without provider credentials
         run: |
           for attempt in $(seq 1 20); do
-            if curl --fail --silent http://127.0.0.1:8080/healthz; then exit 0; fi
+            if curl --fail --silent http://127.0.0.1:8080/health-check; then exit 0; fi
             sleep 1
           done
           exit 1

@@ -8,7 +8,7 @@ private key from Vercel. Existing Vercel initialization is preserved.
 
 `server.cjs` provides the HTTP request/response helpers previously supplied by
 Vercel. It dispatches only the 11 public API handlers and exposes a minimal
-`GET /healthz`. It accepts JSON and URL-encoded PayApp callbacks, preserves bearer
+`GET /health-check` (avoiding Cloud Run's reserved paths ending in `z`). It accepts JSON and URL-encoded PayApp callbacks, preserves bearer
 authorization/query values, rejects invalid/oversized requests, and never logs
 request bodies or credentials. The Vercel-only forwarding header is discarded.
 The direct Cloud Run ingress's final forwarded IP is used for existing telemetry;

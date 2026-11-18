@@ -46,7 +46,8 @@ function createServer({loadHandler=loadProductionHandler,maxBodyBytes=MAX_BODY_B
   const response=decorate(rawResponse);response.setHeader('Cache-Control','no-store');response.setHeader('X-Content-Type-Options','nosniff');
   try{
    const url=new URL(request.url,'http://localhost');
-   if(url.pathname==='/healthz'&&['GET','HEAD'].includes(request.method))return response.status(200).json({status:'ok'});
+   // Cloud Run reserves some paths ending in z, including externally requested /healthz.
+   if(url.pathname==='/health-check'&&['GET','HEAD'].includes(request.method))return response.status(200).json({status:'ok'});
    const name=url.pathname.match(/^\/api\/([a-z][a-z-]*)$/)?.[1];
    if(!allowed.has(name))return response.status(404).json({error:'NOT_FOUND'});
    sanitizeProxyHeaders(request);request.query=fields(url.searchParams);

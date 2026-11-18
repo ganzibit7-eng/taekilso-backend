@@ -5,7 +5,7 @@ async function withServer(fn,options={}){
  try{return await fn('http://127.0.0.1:'+server.address().port);}finally{await new Promise(resolve=>server.close(resolve));}
 }
 test('only declared API routes are dispatched; health exposes no account or configuration data',()=>withServer(async base=>{
- assert.deepEqual(await(await fetch(base+'/healthz')).json(),{status:'ok'});
+ assert.deepEqual(await(await fetch(base+'/health-check')).json(),{status:'ok'});
  for(const path of ['/api/_ban','/api/../server.cjs','/.env','/api/unknown','/api/ai-chat/extra'])assert.equal((await fetch(base+path)).status,404);
  assert.equal(ROUTES.includes('_ban'),false);
 },{loadHandler:()=>{throw Error('must not load handlers');}}));
