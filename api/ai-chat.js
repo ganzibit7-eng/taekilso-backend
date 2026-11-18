@@ -1,4 +1,4 @@
-// AI 사주 상담 챗봇 — 사용자의 사주 정보를 바탕으로 상담해주는 Claude API 프록시입니다.
+// AI 사주 상담 — 서버 설정의 GPT 우선 경로와 Claude 장애 복구를 사용합니다.
 // 무료 3턴 / 프리미엄 일일 상한은 서버에서 강제합니다.
  
 const admin = require('firebase-admin');
