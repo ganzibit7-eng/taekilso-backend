@@ -85,15 +85,24 @@ concurrency 10, timeout 300 seconds and no startup CPU boost. A one-off job on t
 same image/identity successfully checked Firestore reads, Firebase Auth access
 and custom-token signing without member or payment writes.
 
-Vercel's existing Production Secrets cannot be read back. The operator must enter
-the Claude key, PayApp LINKVAL and existing administrator deletion password into
-the new named Secret Manager secrets. Their empty containers must never be
-treated as configured credentials. Telemetry has a new stable secret; anonymous
+Vercel's existing Production Secrets could not be read back. With operator approval,
+a replacement non-expiring Claude key, existing PayApp LINKVAL, and replacement
+administrator deletion password were stored in the named Secret Manager secrets.
+Telemetry has a new stable secret; anonymous
 network/session hash continuity across the old and new platform is not preserved,
 but existing aggregate counters and member/payment records stay in the project.
 Use a UTF-8 string for environment-mounted secrets, not raw random bytes.
 
-No production frontend endpoint has been changed. Remaining release gates:
-populate/verify required secret versions; test actual ingress and application
-authentication; verify consultation/annual/report and payment flows; publish the
-frontend endpoint change with a rollback; preserve historical PayApp callbacks.
+The production frontend was uploaded to Cloudflare Pages with the new API URLs.
+Live verification covered Firebase token exchange, authenticated premium status,
+an actual consultation and free quota, the annual purchase gate, full 12-month
+provider generation with evidence validation, and authenticated PayApp transport
+without an order or charge. The temporary verification member was removed.
+Existing Google-member sessions and stored premium/report data remain in Firebase.
+The old backend remains available while historical PayApp callback routing is
+being checked; a new real financial transaction was not performed by the agent.
+
+`/health-check` is deliberately used instead of `/healthz`: see Google's
+[reserved URL paths](https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths).
+Public service invocation was explicitly approved; application-level Firebase
+authentication, membership checks, administrator checks and payment secrets remain.
