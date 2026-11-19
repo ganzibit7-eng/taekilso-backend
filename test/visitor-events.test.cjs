@@ -41,59 +41,31 @@ test('network budget refuses new sessions without growing counters',async()=>{co
 test('actual first-answer milestone is atomic, once per account, and scoped to the supplied SEO page',async()=>{
  const f=fixture();f.rows.set('users/member',{email:'test@example.com'});await Promise.all([recordMilestone(f.db,'member','firstAiAnswers',{seoSlug:'free-saju'},now),recordMilestone(f.db,'member','firstAiAnswers',{seoSlug:'free-saju'},now)]);assert.equal(f.rows.get('dailyFunnel/2026-11-11').firstAiAnswers,1);assert.equal(f.rows.get('dailySeoLanding/2026-11-11__free-saju').firstAiAnswers,1);
 });
-const preview=(field,session=visit.session)=>({kind:'preview',field,session});
-const memberHeaders={origin:'https://taekilso.com',authorization:'Bearer member'};
-const member={uid:'test-member',email:'fixture@example.com',firebase:{sign_in_provider:'google.com'}};
 
-test('preview stages are ordered for the same tab and attributed to the exposure date across Korean midnight',async()=>{
- const midnight=Date.parse('2026-11-11T15:00:00Z');
- const f=fixture(member,midnight+3000);
- f.rows.set('users/'+member.uid,{});
- f.setTime(midnight-5000);
- assert.equal((await call(f,preview('previewStarts'))).body.reason,'PREVIOUS_STAGE_REQUIRED');
- assert.equal((await call(f,preview('previewViews'))).body.recorded,true);
- assert.equal((await call(f,preview('previewStarts','b'.repeat(32)))).body.reason,'PREVIOUS_STAGE_REQUIRED');
- assert.equal((await call(f,preview('previewSignups'),memberHeaders)).body.reason,'PREVIOUS_STAGE_REQUIRED');
- const starts=await Promise.all([call(f,preview('previewStarts')),call(f,preview('previewStarts'))]);
- assert.equal(starts.filter(r=>r.body.recorded).length,1);
- f.setTime(midnight+5000);
- assert.equal((await call(f,preview('previewViews'))).body.reason,'DUPLICATE');
- assert.equal((await call(f,preview('previewSignups'),memberHeaders)).body.recorded,true);
- assert.equal((await call(f,preview('previewSignups'),memberHeaders)).body.reason,'DUPLICATE');
- assert.deepEqual(f.rows.get('dailyFunnel/2026-11-11'),{date:'2026-11-11',previewViews:1,previewStarts:1,previewSignups:1});
- assert.equal(f.rows.has('dailyFunnel/2026-11-12'),false);
- const privateEntries=[...f.rows].filter(([key])=>key.startsWith('analytics'));
- assert(!JSON.stringify(privateEntries).includes(visit.session));
- assert(!JSON.stringify(privateEntries).includes(member.uid));
-});
-
-test('preview signup requires a new real member and counts across two tabs only once per account',async()=>{
- const f=fixture(member,now+4000),other='b'.repeat(32);
- for(const session of [visit.session,other]) {
-  await call(f,preview('previewViews',session));
-  await call(f,preview('previewStarts',session));
+test('activity totals are independent, idempotent and assigned to the action day in Korea',async()=>{
+ const f=fixture(), action=(field,id)=>({kind:'activity',field,eventId:id.repeat(32)});
+ const open=action('consultationOpens','a'), view=action('exampleReads','a');
+ await Promise.all([call(f,open),call(f,open)]);
+ assert.equal(f.rows.get('dailyFunnel/2026-11-11').consultationOpens,1);
+ f.setTime(Date.parse('2026-11-11T15:01:00Z'));
+ assert.equal((await call(f,open)).body.reason,'DUPLICATE');
+ assert.equal((await call(f,view)).body.recorded,true);
+ assert.equal(f.rows.get('dailyFunnel/2026-11-12').exampleReads,1);
+ const marks=[...f.rows].filter(([k])=>k.startsWith('analyticsEventBuckets/'));
+ assert.equal(marks.length,2);
+ for(const [,record] of marks)assert.deepEqual(Object.keys(record),['expiresAt']);
+ for(const invalid of [{...open,session:visit.session},{kind:'preview',field:'previewSignups',session:visit.session}]){
+   assert.equal((await call(f,invalid)).code,400);
  }
- f.setTime(now+6000);
- assert.equal((await call(f,preview('previewSignups'))).code,401);
- assert.equal((await call(f,preview('previewSignups'),memberHeaders)).body.reason,'MEMBER_RECORD_REQUIRED');
- f.rows.set('users/'+member.uid,{});
- const conversions=await Promise.all([call(f,preview('previewSignups'),memberHeaders),call(f,preview('previewSignups',other),memberHeaders)]);
- assert.equal(conversions.filter(r=>r.body.recorded).length,1);
- assert.equal(f.rows.get('dailyFunnel/2026-11-11').previewSignups,1);
-
- const returning=fixture(member,now-10000);
- returning.rows.set('users/'+member.uid,{});
- await call(returning,preview('previewViews'));
- await call(returning,preview('previewStarts'));
- assert.equal((await call(returning,preview('previewSignups'),memberHeaders)).body.reason,'EXISTING_MEMBER');
 });
-
-test('expired preview cannot be converted and preview events cannot use ordinary counter writes',async()=>{
- const f=fixture();
- assert.equal((await call(f,{...preview('previewViews'),kind:'funnel'})).code,400);
- await call(f,preview('previewViews'));
- f.setTime(now+30*60000);
- assert.equal((await call(f,preview('previewStarts'))).body.reason,'WINDOW_CLOSED');
- assert.equal((await call(f,preview('previewViews'))).body.reason,'DUPLICATE');
- assert.equal(f.rows.get('dailyFunnel/2026-11-11').previewStarts,undefined);
+test('new signup counts without a preview or start and uses the account creation date',async()=>{
+ const created=Date.parse('2026-11-11T14:59:00Z');
+ const f=fixture({uid:'member',email:'test@example.invalid'},created);
+ f.setTime(created+120000);
+ const body={session:visit.session,kind:'funnel',field:'signups'};
+ const headers={origin:'https://taekilso.com',authorization:'Bearer member'};
+ assert.equal((await call(f,body,headers)).body.recorded,true);
+ assert.equal((await call(f,{...body,session:'c'.repeat(32)},headers)).body.reason,'DUPLICATE');
+ assert.equal(f.rows.get('dailyFunnel/2026-11-11').signups,1);
+ assert.equal(await recordMilestone(f.db,'member','firstAiAnswers',{disabled:true}),false);
 });
