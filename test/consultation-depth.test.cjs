@@ -30,3 +30,23 @@ test('ordinary words about being overloaded route to career evidence for Yeonwoo
  assert.ok(bundle.topic_assessments.every(item=>item.topic==='career_business'&&item.supporting_fact_ids.length>0));
  assert.equal(prompt.topic('큰일이 났어요. 무엇부터 하면 좋을까요?'),'general_report');
 });
+
+test('ordinary references to a romantic partner route to relationship evidence for Seohwa',()=>{
+ const message='연인이 서운했다고 말하면 저는 이유부터 설명해요. 사주를 바탕으로 서로 오해를 덜 하려면 어떤 말부터 꺼내면 좋을까요?';
+ const profile={y:1990,m:4,d:2,hourValue:'unknown',gender:'unknown',calType:'solar'};
+ const bundle=calc.build({message,sajuProfile:profile});
+ assert.equal(prompt.assemble(bundle,[],message,'seohwa').topic,'relationship');
+ assert.ok(bundle.topic_assessments.length>0);
+ assert.ok(bundle.topic_assessments.every(item=>item.topic==='relationship'&&item.supporting_fact_ids.length>0));
+});
+
+test('Damwon distinguishes possible homes from possible move dates',()=>{
+ const message='이사 후보 하나는 출퇴근이 편하고 다른 곳은 동네가 마음에 들어요. 제 사주를 바탕으로 평일 생활을 비교할 기준을 알려주세요.';
+ const profile={y:1990,m:4,d:2,hourValue:'unknown',gender:'unknown',calType:'solar'};
+ const bundle=calc.build({message,sajuProfile:profile});
+ assert.equal(prompt.assemble(bundle,[],message,'damwon').topic,'life_transition');
+ assert.ok(bundle.topic_assessments.length>0);
+ assert.ok(bundle.topic_assessments.every(item=>item.topic==='life_transition'&&item.supporting_fact_ids.length>0));
+ assert.equal(prompt.topic('이사 후보 날짜를 비교하고 싶어요.'),'date_selection');
+ assert.equal(prompt.topic('이사는 5월 1일이랑 5월 8일 중에 고민해요.'),'date_selection');
+});
