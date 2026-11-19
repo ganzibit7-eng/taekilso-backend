@@ -68,6 +68,7 @@ async function createRejoinCooldown(admin, db, { uid, identifiers, days = 30, re
     reason,
     createdAtMs: now,
     rejoinAllowedAtMs,
+    expiresAt: new Date(rejoinAllowedAtMs),
     keyHashes: hashes,
     createdAt: admin.firestore.FieldValue.serverTimestamp()
   };
@@ -81,6 +82,7 @@ async function createRejoinCooldown(admin, db, { uid, identifiers, days = 30, re
         uid: String(uid || ''),
         reason,
         rejoinAllowedAtMs,
+        expiresAt: new Date(rejoinAllowedAtMs),
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     }

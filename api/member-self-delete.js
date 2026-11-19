@@ -34,6 +34,9 @@ module.exports = async (req, res) => {
     const decoded = await admin.auth().verifyIdToken(header.slice(7).trim(), true);
     const uid = decoded && decoded.uid;
     if (!uid) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    if (!await require('../lib/deletion-reauth').recentlyAuthenticated(decoded, req.body)) {
+      return res.status(403).json({error:'REAUTH_REQUIRED',message:'같은 계정으로 본인 확인을 다시 한 뒤 탈퇴해 주세요.'});
+    }
 
     const identifiers = await buildIdentifiers(admin, db, uid, decoded);
     const existingBan = await findPermanentBan(db, identifiers);
@@ -47,7 +50,7 @@ module.exports = async (req, res) => {
       reason: 'self_delete'
     });
 
-    // 결제(paymentOrders/payappTransactions)와 문의(inquiries)는 top-level이라 보존됩니다.
+    await require('../lib/inquiry-retention').deleteGeneralInquiries(db, uid);
     await deleteUserData(db, uid);
     await admin.auth().deleteUser(uid).catch((err) => {
       if (!err || err.code !== 'auth/user-not-found') throw err;
