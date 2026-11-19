@@ -9,6 +9,21 @@ function fixture(actor=null,accountCreated=now){
 }
 function response(){return {setHeader(){},status(code){this.code=code;return this},json(body){this.body=body;return this},end(){return this}};}
 const visit={session:'a'.repeat(32),kind:'visit',channel:'google'};
+test('campaign increments only an aggregate on the first recorded daily visit',async()=>{
+ const f=fixture(),event={...visit,campaign:'겨울 상담'};
+ await Promise.all([call(f,event),call(f,event)]);
+ await call(f,{...event,campaign:'later'});
+ await call(f,{...event,session:'b'.repeat(32)});
+ await call(f,{...visit,session:'c'.repeat(32)});
+ const totals=[...f.rows].filter(([k])=>k.startsWith('dailyCampaignVisits/'));
+ assert.equal(totals.length,1);
+ assert.deepEqual(totals[0][1],{date:'2026-11-11',campaign:event.campaign,count:2});
+ assert.equal(f.rows.get('stats/counters').visits,3);
+ assert(!JSON.stringify([...f.rows].filter(([k])=>!k.startsWith('dailyCampaignVisits/'))).includes(event.campaign));
+ for(const bad of [{...visit,campaign:'me@example.com'},{...event,orderId:'order'},{...event,kind:'funnel',field:'signups'}]){
+   assert.equal((await call(f,bad)).code,400);
+ }
+});
 async function call(f,body=visit,headers={origin:'https://taekilso.com','x-forwarded-for':'192.0.2.1'}){const res=response();await f.handler({method:'POST',headers,body},res);return res;}
 test('simultaneous repeated visit records one atomic aggregate and no raw network identifier',async()=>{
  const f=fixture();const results=await Promise.all([call(f),call(f)]);assert.equal(results.filter(x=>x.body.recorded).length,1);assert.equal(f.rows.get('stats/counters').visits,1);assert.equal(f.rows.get('dailyVisits/2026-11-11').count,1);assert.equal(f.rows.get('dailyTrafficSources/2026-11-11').google,1);assert(!JSON.stringify([...f.rows]).includes('192.0.2.1'));
