@@ -61,13 +61,31 @@ test('GPT output uses actual source binding and the existing persona renderer; i
  answer.blocks[0].reference_id='invented-source';calls=0;await assert.rejects(service.generate({body,messages:[{role:'user',content:body.message}],key:'fallback',model:payload.model,providerEnv:env,fetchImpl:async()=>{calls++;return response(raw(answer));}}),{code:'AI_EVIDENCE_VALIDATION_FAILED'});assert.equal(calls,2);
 });
 test('annual GPT generation preserves twelve months, real calculation echoes and rejects a mismatched year source',async()=>{
- const quality=require('../lib/newyear-quality'),profile={y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'};
+ const quality=require('../lib/newyear-quality'),profile={name:'연간식별정보',y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'};
  const prose='실제로 새 제안을 받았다면 맡을 일과 정할 수 있는 범위를 나란히 살펴보세요. 조건이 맞으면 진행하고 다르면 부담을 조정해 보세요. '.repeat(7);
  const report={overview:prose,foundation:prose,opportunities:prose,cautions:prose,closing:prose,
   areas:Array.from({length:4},()=>({title:'내가 정할 범위',reading:prose,action:'제안의 조건을 확인해 보세요.'})),
   months:Array.from({length:12},(_,i)=>({month:i+1,theme:'먼저 정할 기준',reading:prose,action:'실제 역할부터 확인해 보세요.'}))};
  let mismatch=false,calls=0;
- const fetchImpl=async(url,o)=>{calls++;const request=JSON.parse(o.body);assert.equal(request.max_output_tokens,12000);const input=JSON.parse(request.input[0].content);const source_checks=structuredClone(input.source_checks_expected);if(mismatch)source_checks.annualGanZhi='unverified';return response(raw({...report,source_checks},'write_newyear_report'));};
+ const fetchImpl=async(url,o)=>{calls++;assert.doesNotMatch(o.body,/연간식별정보|1990-01-01|birthMs|profileHash/);const request=JSON.parse(o.body);assert.equal(request.max_output_tokens,12000);const input=JSON.parse(request.input[0].content);const source_checks=structuredClone(input.source_checks_expected);if(mismatch)source_checks.annualGanZhi='unverified';return response(raw({...report,source_checks},'write_newyear_report'));};
  const r=await quality.generate({profile,key:'fallback',model:payload.model,providerEnv:env,fetchImpl});assert.equal(r.report.months.length,12);assert.equal(r.diagnostics.selected_provider,'openai');assert.equal(calls,1);
  mismatch=true;await assert.rejects(quality.generate({profile,key:'fallback',model:payload.model,providerEnv:env,fetchImpl}),e=>e.message==='INVALID_REPORT_EVIDENCE');assert.equal(calls,2);
+});
+
+test('primary and fallback payloads omit saved profile, names and previous messages',async()=>{
+ const profile={name:'민감시험이름',y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar',id:'vault-document'};
+ const body={sajuProfile:profile,subjects:[{name:profile.name,profile,summary:'CLIENT_SUMMARY_MARKER'}],
+  message:'민감시험이름 1990-01-01 test@example.invalid 010-1234-5678 이직할까요?',
+  history:[{role:'user',content:'PRIVATE_HISTORY_MARKER'}]};
+ const intercepted=[];
+ await assert.rejects(service.generate({body,key:'fallback',model:payload.model,providerEnv:env,scope:'일반',fetchImpl:async(_url,o)=>{
+  intercepted.push(o.body);
+  return {ok:false,status:500};
+ }}),{code:'AI_UPSTREAM_ERROR'});
+ assert.equal(intercepted.length,2);
+ for (const request of intercepted) {
+  assert.doesNotMatch(request,/민감시험이름|1990-01-01|test@example.invalid|010-1234-5678|vault-document|CLIENT_SUMMARY_MARKER|PRIVATE_HISTORY_MARKER|chart_id/);
+  assert.match(request,/이직할까요/);
+  assert.match(request,/pillars\.day/);
+ }
 });
