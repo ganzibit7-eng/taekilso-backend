@@ -1,5 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),{createRequire}=require('node:module');
 const {calculate}=require('../lib/newyear-calculation'),{isNewyearRequest,hasPass}=require('../lib/newyear-access'),{createService,reportId,validReport}=require('../lib/newyear-report');
+const {NOTICE_VERSION}=require('../lib/ai-transfer-consent');
+const activeConsent={version:NOTICE_VERSION,state:'granted',revision:1,changedAtMs:1};
 const profile={name:'검증용',y:1990,m:1,d:1,calType:'solar',hourValue:'unknown',gender:'unknown'};
 function memory(initial={}){
  const rows=new Map(Object.entries(initial)),events=[];let queue=Promise.resolve();
@@ -30,7 +32,7 @@ test('credits, expired premium and forged client-style premium do not grant acce
 
 test('real paid order with an earlier request/waiting notification unlocks without repurchase, but pending/cancelled/foreign orders never do',async()=>{const f=memory();for(const state of [undefined,1,10,4]){f.rows.set('paymentOrders/paid',{...order,lastPayState:state});assert.equal(await hasPass(f.db,'member',premium,false),true);}for(const state of [8,32,9,64,70,71,99]){f.rows.set('paymentOrders/paid',{...order,lastPayState:state});assert.equal(await hasPass(f.db,'member',premium,false),false);}for(const override of [{status:'pending',pay_state:1,lastPayState:1},{status:'pending',pay_state:10,lastPayState:10},{uid:'other',lastPayState:1},{mul_no:'',lastPayState:1}]){f.rows.set('paymentOrders/paid',{...order,...override});assert.equal(await hasPass(f.db,'member',premium,false),false);}});
 function withChecks(options){const supplied=JSON.parse(JSON.parse(options.body).messages[0].content);return {...structuredClone(report),source_checks:structuredClone(supplied.source_checks_expected)};}
-function serviceFixture(user=premium,provider){const f=memory({'users/member':user,'paymentOrders/paid':order});let calls=0;const handler=createService({db:f.db,authenticate:async()=>({uid:'member',email:'member@example.com'}),isAdminEmail:()=>false,apiKey:'test',model:'test',fetchImpl:async(...args)=>{calls++;if(provider)return provider(...args);return {ok:true,json:async()=>({stop_reason:'tool_use',content:[{type:'tool_use',name:'write_newyear_report',input:withChecks(args[1])}]})}}});return {...f,handler,calls:()=>calls};}
+function serviceFixture(user=premium,provider){const f=memory({'users/member':{aiTransferConsent:activeConsent,...user},'paymentOrders/paid':order});let calls=0;const handler=createService({db:f.db,authenticate:async()=>({uid:'member',email:'member@example.com'}),isAdminEmail:()=>false,apiKey:'test',model:'test',fetchImpl:async(...args)=>{calls++;if(provider)return provider(...args);return {ok:true,json:async()=>({stop_reason:'tool_use',content:[{type:'tool_use',name:'write_newyear_report',input:withChecks(args[1])}]})}}});return {...f,handler,calls:()=>calls};}
 test('free report generation is refused before provider or report writes',async()=>{const f=serviceFixture({premium:false,aiQuestionCredits:99}),r=res();await f.handler({body:{operation:'generate',profile,premium:true}},r);assert.equal(r.code,403);assert.equal(r.body.usageCharged,false);assert.equal(f.calls(),0);assert.equal(f.events.length,0);});
 test('one report per account/year is cached, readable after expiry and locked to its profile',async()=>{const f=serviceFixture(),r=res();await f.handler({body:{operation:'generate',profile}},r);assert.equal(r.code,200);assert(validReport(r.body.report));const cached=res();await f.handler({body:{operation:'generate',profile}},cached);assert.equal(f.calls(),1);const mismatch=res();await f.handler({body:{operation:'generate',profile:{...profile,d:2}}},mismatch);assert.equal(mismatch.code,409);f.rows.set('users/member',{premium:false});const read=res();await f.handler({body:{operation:'status',uid:'someone-else'}},read);assert.equal(read.body.status,'ready');assert.equal(read.body.access,false);assert.equal(f.calls(),1);assert(f.rows.has('newyearReports/'+reportId('member')));});
 test('invalid/truncated generation fails without spending chat credits',async()=>{const f=serviceFixture(premium,async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})})),r=res();await f.handler({body:{operation:'generate',profile}},r);assert.equal(r.code,503);assert.equal(f.rows.get('newyearReports/'+reportId('member')).status,'failed');assert.equal(f.rows.get('users/member').aiFreeUsed,undefined);});
@@ -42,7 +44,7 @@ test('annual stored calculation uses the same ambiguous candidate policy as the 
  const f=serviceFixture(),r=res();await f.handler({body:{operation:'generate',profile:{...profile,y:2027,m:2,d:4}}},r);assert.equal(r.code,200);assert.equal(r.body.calculation.candidateCount,2);assert(!r.body.calculation.pillars.year);assert(!r.body.calculation.pillars.month);assert.equal(r.body.calculation.daewoon,null);assert.equal(r.body.calculation.calculation.version,require('../lib/consultation-calculation').VERSION);assert(!r.body.report.foundation.includes('연주 정미'));
 });
 function chatFixture(user,reply='일반 상담 답변',identity={uid:'member',email:'member@example.com'},provider,now){
- const f=memory({'users/member':user,'paymentOrders/paid':order});let calls=0,kakaoCalls=0,body;
+ const f=memory({'users/member':{aiTransferConsent:activeConsent,...user},'paymentOrders/paid':order});let calls=0,kakaoCalls=0,body;
  const admin={apps:[{}],firestore:()=>f.db,auth:()=>({verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(identity instanceof Error)throw identity;return identity;}})};
  admin.firestore.FieldValue={increment:n=>({__increment:n}),serverTimestamp:()=>0};
  const filename=path.resolve(__dirname,'../api/ai-chat.js'),realRequire=createRequire(filename),context={module:{exports:{}},exports:{},require:name=>name==='firebase-admin'?admin:realRequire(name),process:{env:{ANTHROPIC_API_KEY:'test'}},console:{log(){},warn(){},error(){}},setTimeout,clearTimeout,AbortController,fetch:async(url,opts)=>{if(String(url).startsWith('https://kapi.kakao.com/')){kakaoCalls++;return {ok:true,json:async()=>({id:42})};}calls++;body=JSON.parse(opts.body);if(provider)return provider(body);const structured={status:'answer',headline:reply,blocks:[{kind:'practical_suggestion',title:'실천',text:'현실 조건을 확인해 보세요.',person_id:null,candidate_ids:[],assessment_ids:[],context_ids:[],evidence:[]}],options:[],actions:[],follow_up_question:null,data_limitations:[]};return {ok:true,json:async()=>body.tools?({model:body.model,stop_reason:'tool_use',content:[{type:'tool_use',name:'write_consultation',input:structured}]}):({stop_reason:'end_turn',content:[{type:'text',text:reply}]})}}};
@@ -53,7 +55,7 @@ function chatFixture(user,reply='일반 상담 답변',identity={uid:'member',em
 const quotaRequest=()=>({method:'POST',headers:{authorization:'Bearer account'},body:{message:'이직할 때 현실적인 선택 기준을 알려줘',sajuProfile:profile}});
 
 test('unsupported personal calculations do not consume free or purchased questions or invoke Claude',async()=>{
- for(const user of [{premium:false,aiFreeUsed:0},{premium:false,aiFreeUsed:3,aiQuestionCredits:7}]){const f=chatFixture(user),r=res();const req=quotaRequest();req.body.message='내 용신을 계산해서 알려줘';await f.handler(req,r);assert.equal(r.code,200);assert.equal(r.body.usageCharged,false);assert.equal(r.body.stopReason,'server_capability');assert.equal(f.calls(),0);assert.deepEqual(f.rows.get('users/member'),user);assert.equal(f.events.length,0);}
+ for(const user of [{premium:false,aiFreeUsed:0},{premium:false,aiFreeUsed:3,aiQuestionCredits:7}]){const f=chatFixture(user),r=res();const req=quotaRequest();req.body.message='내 용신을 계산해서 알려줘';await f.handler(req,r);assert.equal(r.code,200);assert.equal(r.body.usageCharged,false);assert.equal(r.body.stopReason,'server_capability');assert.equal(f.calls(),0);assert.deepEqual(f.rows.get('users/member'),{aiTransferConsent:activeConsent,...user});assert.equal(f.events.length,0);}
 });
 
 test('banned and deleted-account cooldown identities are denied before chat or annual generation',async()=>{
@@ -149,4 +151,41 @@ test('failed annual generation backs off and hourly attempt cap cannot be reset 
  const second=res();await f.handler({body:{operation:'generate',profile}},second);assert.equal(second.code,429);assert.equal(f.calls(),1);
  const key='newyearReports/'+reportId('member'),stored=f.rows.get(key);f.rows.set(key,{...stored,failedAt:Date.now()-61000,attemptWindow:Math.floor(Date.now()/3600000),windowAttempts:3});
  const cap=res();await f.handler({body:{operation:'generate',profile}},cap);assert.equal(cap.code,429);assert.equal(f.calls(),1);
+});
+
+test('account consent is managed only for the authenticated member and blocks chat after withdrawal', async()=>{
+ const f=chatFixture({premium:false,aiFreeUsed:0,aiTransferConsent:null});
+ const call=async body=>{const r=res();await f.handler({method:'POST',headers:{authorization:'Bearer fixture'},body},r);return r;};
+ const request=operation=>({action:'ai-transfer-consent',operation,uid:'ignored'});
+ assert.equal((await call({message:'이직할까요?',sajuProfile:profile})).code,403);
+ assert.equal(f.calls(),0);
+ assert.equal((await call(request('status'))).body.state,'not_granted');
+ const granted=await call({...request('grant'),noticeVersion:NOTICE_VERSION,expectedRevision:0});
+ assert.equal(granted.code,200); assert.equal(granted.body.state,'granted');
+ assert(!f.rows.has('users/ignored'));
+ assert.equal((await call(request('status'))).body.revision,1);
+ assert.equal((await call(request('withdraw'))).body.state,'withdrawn');
+ assert.equal((await call({...request('grant'),noticeVersion:NOTICE_VERSION,expectedRevision:0})).code,409);
+ assert.equal((await call({message:'이직할까요?',sajuProfile:profile})).code,403);
+ assert.equal(f.calls(),0);assert.equal(f.rows.get('users/member').aiFreeUsed,0);
+});
+test('withdrawal disables new seasonal generation without blocking access to status',async()=>{
+ const f=serviceFixture({...premium,aiTransferConsent:{...activeConsent,state:'withdrawn'}});
+ const status=res(),generate=res();
+ await f.handler({body:{operation:'status'}},status);
+ await f.handler({body:{operation:'generate',profile}},generate);
+ assert.equal(status.code,200);
+ assert.equal(generate.code,403);
+ assert.equal(generate.body.error,'AI_TRANSFER_CONSENT_REQUIRED');
+ assert.equal(f.calls(),0);
+});
+test('an in-flight request may not send a fallback after the consent revision changes',async()=>{
+ const {guardProvider}=require('../lib/ai-transfer-consent');
+ const f=memory({'users/member':{aiTransferConsent:activeConsent}});
+ let calls=0;
+ const guarded=guardProvider(f.db,'member',1,async()=>{calls++;});
+ await guarded('provider');
+ f.rows.set('users/member',{aiTransferConsent:{...activeConsent,revision:3}});
+ await assert.rejects(guarded('fallback'),{code:'AI_TRANSFER_CONSENT_REQUIRED'});
+ assert.equal(calls,1);
 });
