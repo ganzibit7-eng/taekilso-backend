@@ -12,7 +12,7 @@ const roles = [
   ['sodam','소담','날짜 두 개를 펼쳐 놓으셨군요. 하객이 출발하는 아침부터 먼저 그려보시지요.','어서 오시지요.'],
   ['harin','하린','둘 다 웃을 때 말고, 주문 기다리느라 잠깐 조용했을 때요. 그때도 편했다면 다음에 또 만나볼 이유가 있죠.','반가워요.'],
   ['ijun','이준','지금 답장이 온다고 해봐요. 지난번에 못 했던 말을 이번에는 할 수 있을지요.','여기까지 와 주셨군요.'],
-  ['yeonseo','연서','그라모 둘 다 늦게 오는 날부터 정해예. 밥보다 뒤에 남은 설거지를 누가 할지, 그때가 더 막막하지예.','어서 오셨네예.'],
+  ['yeonseo','연서','그라모 둘 다 늦는 날부터 정해 보시지예. 밥 먹는 일보다 그 뒤를 누가 먼저 챙길지가 더 막막하거든예.','어서 오셨네예.'],
   ['haeon','해온','일단 공고에서 가장 끌린 문장 하나만 골라요. 면접에서는 그게 입사 첫 주에 무슨 일인지 물어봐요.','좋아요, 같이 봐요.'],
   ['taeyul','태율','간판부터 만들 건 없쥬. 만들고 싶은 것 하나만 들고 가서 누가 왜 찾는지 먼저 들어봐유.','잘 오셨어유.'],
   ['daon','다온','식사 골랐는데 무료 배달까지 얼마 남았다는 문구가 뜨잖아요. 딱 그때, 더 담기 전에 멈춰보는 거예요.','편하게 얘기해 봐요.'],
@@ -124,7 +124,7 @@ test('the advisor voice can carry into plain paragraphs without rewriting quoted
   assert.equal(write('dogyeom'),text);
   assert.match(write('mujin','두 회사의 평가 방식을 확인하십시오.'),/확인하세요/);
   assert.match(write('taeyul'),/적어 봐유/);
-  assert.match(write('yeonseo'),/적어 봐예/);
+  assert.match(write('yeonseo'),/적어 보시지예/);
   assert.equal(write('sihyeon'),text);
   const dialect='작게 시작해 봐유. 살펴보세요.';
   assert.equal(write('taeyul',dialect),'작게 시작해 봐유. 살펴봐유.');
@@ -152,7 +152,13 @@ test('mixed production prose uses the same regional register from sentence to se
   assert.equal(taeyul('시장 수요. 필요한 준비 개요. 앞으로 정할 것들.'),'시장 수요. 필요한 준비 개요. 앞으로 정할 것들.');
   assert.equal(taeyul('하나씩 나눕니다. 평가를 비교하십시오. 이게 첫 단계입니다.'),'하나씩 나눠유. 평가를 비교해유. 이게 첫 단계예유.');
   const yeonseo=personas.spokenProse('yeonseo');
-  assert.equal(yeonseo('둘이 합의할 일이 있습니다. 평일에 누가 할지 물어보세요.'),'둘이 합의할 일이 있어예. 평일에 누가 할지 물어봐예.');
+  assert.equal(yeonseo('둘이 합의할 일이 있습니다. 평일에 누가 할지 물어보세요.'),'둘이 합의할 일이 있어예. 평일에 누가 할지 물어보시지예.');
   const standard=personas.spokenProse('sihyeon');
   assert.equal(standard('업무 범위를 확인하십시오. 결정권을 맡습니까? 선택지가 좁혀집니다.'),'업무 범위를 확인하세요. 결정권을 맡나요? 선택지가 좁혀지지요.');
+});
+
+test('Yeonseo softens recommendations without changing the quoted conversation',()=>{
+  const yeonseo=personas.spokenProse('yeonseo');
+  const text='맡을 일을 하나만 정해 보이소. 같은 말로 다른 걸 생각할 수 있지예. “나는 이 부분이 먼저 정해졌으면 좋겠어.”라고 전해 보세요.';
+  assert.equal(yeonseo(text),'맡을 일을 하나만 정해 보시지예. 같은 말로 다른 걸 생각할 수 있지예. “나는 이 부분이 먼저 정해졌으면 좋겠어.”라고 전해 보시지예.');
 });
