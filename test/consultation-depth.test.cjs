@@ -19,3 +19,14 @@ test('length instructions preserve unsupported-data boundaries, persona and one 
  assert.doesNotMatch(prompt.OUTPUT,/2~3개 짧은 문단이면 충분|후속 질문은 한 문단/);
  assert.equal(assembled.topic,'career_business');
 });
+
+test('ordinary words about being overloaded route to career evidence for Yeonwoo',()=>{
+ const message='일이 몰리면 전부 맡다가 지쳐요. 제 사주에서 일할 때의 강점과, 일을 나눌 때 적용해볼 기준을 쉽게 알려주세요.';
+ const profile={y:1990,m:4,d:2,hourValue:'unknown',gender:'unknown',calType:'solar'};
+ const bundle=calc.build({message,sajuProfile:profile});
+ const assembled=prompt.assemble(bundle,[],message,'yeonwoo');
+ assert.equal(assembled.topic,'career_business');
+ assert.ok(bundle.topic_assessments.length>0);
+ assert.ok(bundle.topic_assessments.every(item=>item.topic==='career_business'&&item.supporting_fact_ids.length>0));
+ assert.equal(prompt.topic('큰일이 났어요. 무엇부터 하면 좋을까요?'),'general_report');
+});
