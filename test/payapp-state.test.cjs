@@ -110,6 +110,14 @@ test('5,900-won relationship report stays paused for everyone and issues only to
  const {reports}=await relationship.run(f.db,'member',{operation:'list'});
  assert.equal(reports.length,1);
  assert.equal(reports[0].report.conversations.length,3);
+ assert.equal(reports[0].report.chapters.length,12);
+ const savedKey='users/member/relationshipReports/'+purchase.id;
+ const stored=f.rows.get(savedKey);
+ const {edition,chapters,routine,...legacy}=stored.report;
+ f.rows.set(savedKey,{...stored,report:legacy});
+ assert.equal((await relationship.run(f.db,'member',{operation:'open',id:purchase.id})).report.chapters.length,12);
+ assert.equal((await relationship.run(f.db,'member',{operation:'list'})).reports[0].report.edition,2);
+ assert.equal(f.rows.get(savedKey).report.edition,undefined);
  assert.equal(f.rows.get('stats/counters').revenue,14800);
  assert.equal((await f.notify(9,pay)).body,'SUCCESS');
  assert.equal((await relationship.run(f.db,'member',{operation:'list'})).reports.length,0);
