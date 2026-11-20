@@ -8,13 +8,13 @@ const roles = [
   ['yeonwoo','연우','생각이 자꾸 같은 자리로 돌면, 오늘 정할 것 하나만 같이 골라봐요.','어서 오세요.'],
   ['seohwa','서화','마음에 오래 남은 건 그 말보다, 그 말을 듣고도 아무렇지 않은 척했던 순간일 수 있어요.','잘 찾아오셨어요.'],
   ['dogyeom','도겸','장부 한 장에는 돈 들어오는 날, 옆 장에는 먼저 나가는 날을 적어보세요. 그 사이가 비는 날부터 봐야 해요.','잘 오셨어요.'],
-  ['mujin','무진','맡을 일이 늘어나는군요. 그중 혼자 결정할 수 있는 일부터 물어보시지요. 거기서 두 자리가 갈리지요.','오셨군요.'],
-  ['sodam','소담','날짜 두 개를 펼쳐 놓으셨군요. 하객이 출발하는 아침부터 먼저 그려보시지요.','어서 오시지요.'],
+  ['mujin','무진','맡을 일이 늘어나는 자리군요. 그중 어디까지 직접 결정할 수 있는지부터 물어보세요.','오셨군요.'],
+  ['sodam','소담','두 날짜 모두 괜찮다면 하객이 집에서 출발하는 아침부터 떠올려 보세요. 그러면 어디에 여유가 필요한지 보여요.','편하게 이야기해 주세요.'],
   ['harin','하린','둘 다 웃을 때 말고, 주문 기다리느라 잠깐 조용했을 때요. 그때도 편했다면 다음에 또 만나볼 이유가 있죠.','반가워요.'],
-  ['ijun','이준','지금 답장이 온다고 해봐요. 지난번에 못 했던 말을 이번에는 할 수 있을지요.','여기까지 와 주셨군요.'],
-  ['yeonseo','연서','그라모 둘 다 늦는 날부터 정해 보시지예. 밥 먹는 일보다 그 뒤를 누가 먼저 챙길지가 더 막막하거든예.','어서 오셨네예.'],
+  ['ijun','이준','지금 답장이 온다고 생각해 봐요. 지난번에 못 했던 말 중에 이번에는 꼭 하고 싶은 말이 있나요?','여기까지 와 주셨군요.'],
+  ['yeonseo','연서','두 분 다 늦는 날에는 저녁을 어떻게 할지부터 얘기해 봐요. 밥 자체보다 누가 먼저 챙길지 몰라 마음이 쓰일 때도 있거든요.','두 분 이야기를 들어볼게요.'],
   ['haeon','해온','일단 공고에서 가장 끌린 문장 하나만 골라요. 면접에서는 그게 입사 첫 주에 무슨 일인지 물어봐요.','좋아요, 같이 봐요.'],
-  ['taeyul','태율','간판부터 만들 건 없쥬. 만들고 싶은 것 하나만 들고 가서 누가 왜 찾는지 먼저 들어봐유.','잘 오셨어유.'],
+  ['taeyul','태율','간판을 만들기엔 아직 일러요. 먼저 하나만 만들어 보여주고, 사람들이 어디에 쓰고 싶어 하는지 들어봐요.','작게 시작할 방법부터 볼까요?'],
   ['daon','다온','식사 골랐는데 무료 배달까지 얼마 남았다는 문구가 뜨잖아요. 딱 그때, 더 담기 전에 멈춰보는 거예요.','편하게 얘기해 봐요.'],
   ['sihyeon','시현','성과를 맡는 자리라면 일정과 우선순위도 내가 정할 수 있는지부터 확인하세요.','만나서 반가워요.'],
   ['yeoul','여울','오늘 다 할 일을 정하기 전에, 책을 펴면 맨 처음 할 일부터 골라봐요.','잘 오셨어요, 같이 시작해요.'],
@@ -57,6 +57,8 @@ test('all advisors reach the provider with distinct examples and the same data a
         const reminderAt=system.lastIndexOf('\n\n[현재 상담사의 말투]');
         assert.ok(reminderAt>boundary);
         assert.equal(system.slice(reminderAt+2),personas.voiceReminder(consultantId));
+        assert.match(system.slice(reminderAt),/현대 한국 표준어의 해요체/);
+        assert.match(system.slice(reminderAt),/누가 누구에게 무엇을 말하는지 분명/);
         const common = {system:system.slice(boundary,reminderAt), ...rest};
         if (!shared) shared = common;
         else assert.deepEqual(common,shared);
@@ -123,11 +125,11 @@ test('the advisor voice can carry into plain paragraphs without rewriting quoted
   const write=(id,content=text)=>personas.spokenProse(id)(content);
   assert.equal(write('dogyeom'),text);
   assert.match(write('mujin','두 회사의 평가 방식을 확인하십시오.'),/확인하세요/);
-  assert.match(write('taeyul'),/적어 봐유/);
-  assert.match(write('yeonseo'),/적어 보시지예/);
+  assert.equal(write('taeyul'),text);
+  assert.equal(write('yeonseo'),text);
   assert.equal(write('sihyeon'),text);
   const dialect='작게 시작해 봐유. 살펴보세요.';
-  assert.equal(write('taeyul',dialect),'작게 시작해 봐유. 살펴봐유.');
+  assert.equal(write('taeyul',dialect),'작게 시작해 봐요. 살펴보세요.');
   const output=require('../lib/consultation-output');
   const rendered=output.render({
     headline:'정산일 확인하기',status:'answer',options:[],actions:[],data_limitations:[],
@@ -136,29 +138,32 @@ test('the advisor voice can carry into plain paragraphs without rewriting quoted
       {kind:'practical_suggestion',title:'상대방에게 보낼 문장',text:'이렇게 먼저 말해 보세요. “정산 일정을 확인하려고 합니다. 언제쯤 입금될까요?” 이렇게 쓰면 수월해져요.'}
     ]
   },{charts:[],date_candidates:[]},'','taeyul');
-  assert.match(rendered,/확인해 봐유/);
-  assert.match(rendered,/이렇게 먼저 말해 봐유\./);
-  assert.match(rendered,/“정산 일정을 확인하려고 해요\. 언제쯤 입금될까요\?”/);
-  assert.match(rendered,/수월해져유\./);
+  assert.match(rendered,/확인해 보세요/);
+  assert.match(rendered,/이렇게 먼저 말해 보세요\./);
+  assert.match(rendered,/“정산 일정을 확인하려고 합니다\. 언제쯤 입금될까요\?”/);
+  assert.match(rendered,/수월해져요\./);
 });
 
-test('mixed production prose uses the same regional register from sentence to sentence', () => {
+test('mixed production prose is written in standard Korean from sentence to sentence', () => {
   const first='당신의 사주에는 자기 기준과 동료 사이의 관계를 나타내는 요소가 있어유. 이것은 자율적으로 정하는 범위와 함께 책임지는 범위를 나눠볼 수 있다는 뜻입니다.';
   const second='비교해 봐유. 또한 책임과 평가 기준이 맞물리는 업무환경을 살펴볼 수 있는 요소도 있습니다. 안정적인 조직을 원한다면 규정의 명확함을, 자율성을 원한다면 승인 절차와 재량의 범위를 비교해 보세요.';
   const taeyul=personas.spokenProse('taeyul');
-  assert.match(taeyul(first),/있어유\. .*뜻이에유\.$/);
-  assert.match(taeyul(second),/봐유\. .*있어유\. .*비교해 봐유\.$/);
-  assert.equal(taeyul('훨씬 수월해져요. 먼저 확인하고요. 더 알아보셔도 되어유.'),'훨씬 수월해져유. 먼저 확인하고유. 더 알아보셔도 돼유.');
+  assert.match(taeyul(first),/있어요\. .*뜻이에요\.$/);
+  assert.match(taeyul(second),/봐요\. .*있어요\. .*비교해 보세요\.$/);
+  assert.equal(taeyul('훨씬 수월해져요. 먼저 확인하고요. 더 알아보셔도 되어유.'),'훨씬 수월해져요. 먼저 확인하고요. 더 알아보셔도 돼요.');
   assert.equal(taeyul('시장 수요. 필요한 준비 개요. 앞으로 정할 것들.'),'시장 수요. 필요한 준비 개요. 앞으로 정할 것들.');
-  assert.equal(taeyul('하나씩 나눕니다. 평가를 비교하십시오. 이게 첫 단계입니다.'),'하나씩 나눠유. 평가를 비교해유. 이게 첫 단계예유.');
+  assert.equal(taeyul('하나씩 나눕니다. 평가를 비교하십시오. 이게 첫 단계입니다.'),'하나씩 나눠요. 평가를 비교하세요. 이게 첫 단계예요.');
   const yeonseo=personas.spokenProse('yeonseo');
-  assert.equal(yeonseo('둘이 합의할 일이 있습니다. 평일에 누가 할지 물어보세요.'),'둘이 합의할 일이 있어예. 평일에 누가 할지 물어보시지예.');
+  assert.equal(yeonseo('둘이 합의할 일이 있습니다. 평일에 누가 할지 물어보세요.'),'둘이 합의할 일이 있어요. 평일에 누가 할지 물어보세요.');
   const standard=personas.spokenProse('sihyeon');
   assert.equal(standard('업무 범위를 확인하십시오. 결정권을 맡습니까? 선택지가 좁혀집니다.'),'업무 범위를 확인하세요. 결정권을 맡나요? 선택지가 좁혀지지요.');
 });
 
-test('Yeonseo softens recommendations without changing the quoted conversation',()=>{
+test('Korean editing corrects familiar endings and spelling while leaving quoted speech intact',()=>{
   const yeonseo=personas.spokenProse('yeonseo');
   const text='맡을 일을 하나만 정해 보이소. 같은 말로 다른 걸 생각할 수 있지예. “나는 이 부분이 먼저 정해졌으면 좋겠어.”라고 전해 보세요.';
-  assert.equal(yeonseo(text),'맡을 일을 하나만 정해 보시지예. 같은 말로 다른 걸 생각할 수 있지예. “나는 이 부분이 먼저 정해졌으면 좋겠어.”라고 전해 보시지예.');
+  assert.equal(yeonseo(text),'맡을 일을 하나만 정해 보세요. 같은 말로 다른 걸 생각할 수 있지요. “나는 이 부분이 먼저 정해졌으면 좋겠어.”라고 전해 보세요.');
+  assert.equal(yeonseo('지금 확인해도 되요. 다음에 볼께요.'),'지금 확인해도 돼요. 다음에 볼게요.');
+  assert.equal(personas.needsLanguageRepair('같이 보입니더.'),true);
+  assert.equal(personas.needsLanguageRepair('“같이 보입니더.”라고 말했어요.'),false);
 });

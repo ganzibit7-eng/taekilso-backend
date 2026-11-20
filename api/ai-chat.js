@@ -932,6 +932,7 @@ module.exports = async (req, res) => {
     replyText = replyText
       .replace(/\\([#*_~`>\-])/g, '$1')
       .replace(/(^|\n)(\s*\d+)\\\.(\s+)/g, '$1$2.$3');
+    if (!qualityResult) replyText = consultationPersonas.spokenProse()(replyText);
 
 
     // ========================================================
