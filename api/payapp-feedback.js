@@ -3,7 +3,7 @@ const admin=require('firebase-admin'),crypto=require('node:crypto');
 const {URL}=require('node:url');
 const entitlement=require('../lib/payment-entitlements');
 const storyReports=[...require('../lib/seohwa-report').reports.values()].map(service=>service.CONFIG);
-const reports=Object.fromEntries([require('../lib/date-report').CONFIG,require('../lib/relationship-report').CONFIG,...storyReports]
+const reports=Object.fromEntries([require('../lib/date-report').CONFIG,require('../lib/relationship-report').CONFIG,require('../lib/newyear-purchase').CONFIG,...storyReports]
  .map(config=>[config.product,config]));
 let db=null,initError=null;
 try{if(!admin.apps.length)admin.initializeApp({credential:admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))});db=admin.firestore();}catch(e){initError=e;}

@@ -47,14 +47,15 @@ test('existing home sale gets its own month and follows short questions without 
  assert.equal(build(1,'아파트 매도일 2027년 5월 2일과 6일 비교').movingWindow,undefined);
 });
 
-test('sale answer keeps the calculated month when model output cannot be used',async()=>{
+test('sale answer includes confirmed personal themes and never falls back to logistics',async()=>{
  const service=require('../lib/consultation-service'), message='기존 집이 내년 몇 월에 잘 팔릴까요?';
- const answer=await service.generate({body:{sajuProfile:profile(4),message},annualAllowed:false,consultantId:'yeonwoo',
-  scope:'일반',now,model:'fixture',key:'fixture',providerEnv:{},fetchImpl:async()=>({
-   ok:true,json:async()=>({stop_reason:'tool_use',content:[{type:'tool_use',name:'write_consultation',input:{}}]})
-  })});
+ const read=d=>service.generate({body:{sajuProfile:profile(d),message},annualAllowed:false,consultantId:'yeonwoo',
+  scope:'일반',now,model:'fixture',key:'fixture',providerEnv:{},fetchImpl:async()=>{assert.fail('confirmed personal themes do not require a provider');}});
+ const answer=await read(4),other=await read(1);
  assert.match(answer.reply,/^기존 집 매매는 \*\*2027년 2월\*\*/);
  assert.equal(answer.stopReason,'server_home_sale_month');
  assert.match(answer.evidence[0].value,/2027-02-05 ~ 2027-03-05/);
- assert.equal(answer.reply.slice(answer.movingPrefix.length),'');
+ assert.notEqual(answer.reply.slice(answer.movingPrefix.length),other.reply.slice(other.movingPrefix.length));
+ assert(answer.evidence.length>2);
+ assert.doesNotMatch(answer.reply,/잔금|입주일|시세 조회|중개사/);
 });

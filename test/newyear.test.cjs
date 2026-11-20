@@ -34,6 +34,25 @@ test('real paid order with an earlier request/waiting notification unlocks witho
 function withChecks(options){const supplied=JSON.parse(JSON.parse(options.body).messages[0].content);return {...structuredClone(report),source_checks:structuredClone(supplied.source_checks_expected)};}
 function serviceFixture(user=premium,provider){const f=memory({'users/member':{aiTransferConsent:activeConsent,...user},'paymentOrders/paid':order});let calls=0;const handler=createService({db:f.db,authenticate:async()=>({uid:'member',email:'member@example.com'}),isAdminEmail:()=>false,apiKey:'test',model:'test',fetchImpl:async(...args)=>{calls++;if(provider)return provider(...args);return {ok:true,json:async()=>({stop_reason:'tool_use',content:[{type:'tool_use',name:'write_newyear_report',input:withChecks(args[1])}]})}}});return {...f,handler,calls:()=>calls};}
 test('free report generation is refused before provider or report writes',async()=>{const f=serviceFixture({premium:false,aiQuestionCredits:99}),r=res();await f.handler({body:{operation:'generate',profile,premium:true}},r);assert.equal(r.code,403);assert.equal(r.body.usageCharged,false);assert.equal(f.calls(),0);assert.equal(f.events.length,0);});
+test('standalone annual orders unlock the annual report only and a refunded order hides the report',async()=>{
+ const annual=require('../lib/newyear-purchase'),f=serviceFixture({premium:false,aiQuestionCredits:5}),orderId='TAK-NEWYEAR-TEST';
+ const marker='users/member/'+annual.CONFIG.collection+'/'+annual.id;
+ f.rows.set(marker,{ready:true,paidOrderId:orderId});
+ f.rows.set('paymentOrders/'+orderId,{...order,product:annual.CONFIG.product,amount:annual.CONFIG.price,[annual.CONFIG.orderKey]:annual.id,entitlementGranted:true});
+ const r=res();await f.handler({body:{operation:'generate',profile}},r);
+ assert.equal(r.code,200);
+ assert.equal(r.body.access,true);
+ assert.equal(r.body.chatAccess,false);
+ assert.equal(await hasPass(f.db,'member',f.rows.get('users/member'),false),false);
+ const duplicate=res();await f.handler({body:{operation:'prepare-purchase',checkout:true}},duplicate);
+ assert.deepEqual(duplicate.body,{state:'owned'});
+ f.rows.get('paymentOrders/'+orderId).status='refunded';
+ const result=res();await f.handler({body:{operation:'checkout-status',orderId}},result);
+ assert.equal(result.body.status,'none');
+ assert.equal(result.body.report,null);
+ assert.equal(result.body.paymentState,'cancelled');
+ assert.equal(f.calls(),1);
+});
 test('one report per account/year is cached, readable after expiry and locked to its profile',async()=>{const f=serviceFixture(),r=res();await f.handler({body:{operation:'generate',profile}},r);assert.equal(r.code,200);assert(validReport(r.body.report));const cached=res();await f.handler({body:{operation:'generate',profile}},cached);assert.equal(f.calls(),1);const mismatch=res();await f.handler({body:{operation:'generate',profile:{...profile,d:2}}},mismatch);assert.equal(mismatch.code,409);f.rows.set('users/member',{premium:false});const read=res();await f.handler({body:{operation:'status',uid:'someone-else'}},read);assert.equal(read.body.status,'ready');assert.equal(read.body.access,false);assert.equal(f.calls(),1);assert(f.rows.has('newyearReports/'+reportId('member')));});
 test('invalid/truncated generation fails without spending chat credits',async()=>{const f=serviceFixture(premium,async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})})),r=res();await f.handler({body:{operation:'generate',profile}},r);assert.equal(r.code,503);assert.equal(f.rows.get('newyearReports/'+reportId('member')).status,'failed');assert.equal(f.rows.get('users/member').aiFreeUsed,undefined);});
 test('concurrent report generation claims a single provider request',async()=>{let unlock,started;const signal=new Promise(r=>started=r),wait=new Promise(r=>unlock=r);const f=serviceFixture(premium,async(...args)=>{started();await wait;return {ok:true,json:async()=>({stop_reason:'tool_use',content:[{type:'tool_use',name:'write_newyear_report',input:withChecks(args[1])}]})}});const first=res(),running=f.handler({body:{operation:'generate',profile}},first);await signal;const second=res();await f.handler({body:{operation:'generate',profile}},second);assert.equal(second.code,202);unlock();await running;assert.equal(first.code,200);assert.equal(f.calls(),1);});
