@@ -71,5 +71,6 @@ test('ordinary outcome questions get an outlook grounded in the selected chart a
 test('outlook quality check distinguishes a disclaimer-led answer from a conditional reading',()=>{
  assert(output.opensWithDisclaimer('이번 면접의 합격을 단정할 수는 없지만, 경험을 설명할 때 강점이 드러나요.'));
  assert(output.opensWithDisclaimer('다시 연락이 이어질지는 단정할 수 없어요. 다만 대화할 여지는 있어요.'));
+ assert(output.opensWithDisclaimer('경험이 강점으로 읽혀요. 합격 자체를 가를 근거는 없지만 방법은 있어요.'));
  assert(!output.opensWithDisclaimer('조건을 하나 열어둘 때 매매 이야기가 진전되기 쉬운 흐름이에요. 매수자의 의도까지 알 수는 없어요.'));
 });
