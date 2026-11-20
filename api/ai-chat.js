@@ -925,7 +925,9 @@ module.exports = async (req, res) => {
     // 여기까지 왔으면 성공한 요청이므로 그대로 확정합니다.
     // ========================================================
  
-    if (!newyearAllowed && newyearAccess.containsAnnualReading(replyText)) {
+    const checkedNarrative=qualityResult?.movingPrefix && replyText.startsWith(qualityResult.movingPrefix)
+      ? replyText.slice(qualityResult.movingPrefix.length) : replyText;
+    if (!newyearAllowed && newyearAccess.containsAnnualReading(checkedNarrative)) {
       await rollbackUsageReservation(uid, usageReservation);
       return res.status(502).json({error:'AI_SCOPE_VALIDATION_FAILED',message:'질문 범위에 맞는 답변을 완성하지 못했어요. 질문 횟수는 사용되지 않았습니다. 다시 시도해 주세요.',usageCharged:false});
     }
