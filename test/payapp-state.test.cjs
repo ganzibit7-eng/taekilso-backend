@@ -135,6 +135,66 @@ test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 �
  assert.equal(f.rows.get('stats/counters').revenue,0);
 });
 const dateComparison={event:'결혼식',days:['2027-05-15','2027-05-16','2027-05-23'],mine:'화',partner:'목'};
+
+test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당 상담사로 한정된다',async()=>{
+ for(const consultant of ['dogyeom','ijun','mujin']){
+  const f=fixture(), service=seohwa.reports.get(consultant);
+  f.rows.set('siteSettings/checkout',{enabled:true});
+  await seohwaTransfer.manage(f.db,'member',{operation:'grant',noticeVersion:seohwaTransfer.NOTICE_VERSION,expectedRevision:0});
+  const created=await service.run(f.db,'member',seohwaCheckout);
+  const {id,orderId}=created;
+  const status={operation:'checkout-status',orderId};
+  const event={var1:orderId,price:5900,goodname:created.name};
+  const wrong=seohwa.reports.get(consultant==='dogyeom'?'mujin':'dogyeom');
+  await assert.rejects(wrong.run(f.db,'member',status),{code:'REPORT_ORDER_NOT_FOUND'});
+  await assert.rejects(service.run(f.db,'other',status),{code:'REPORT_ORDER_NOT_FOUND'});
+  assert.equal((await f.notify(4,{...event,goodname:wrong.CONFIG.name})).body,'INVALID_PRODUCT_NAME');
+  assert.equal((await f.notify(4,event)).body,'SUCCESS');
+  assert.equal((await f.notify(4,event)).body,'SUCCESS');
+  assert.equal((await service.run(f.db,'member',status)).state,'paid');
+  assert.equal(f.rows.get('stats/counters').purchases,1);
+  let requests=0;
+  const ready=await service.generate(f.db,'member',id,{env:{AI_PRIMARY_PROVIDER:'openai',OPENAI_MODEL:'gpt-6.2-sol',OPENAI_API_KEY:'synthetic'},fetchImpl:async(url,settings)=>{
+   requests++;
+   const req=JSON.parse(settings.body);
+   assert(!JSON.stringify(req).includes('1990'));
+   const input=JSON.parse(req.input[0].content);
+   const chapters=input.chapterPlan.map(({requiredBasis,title},index)=>({highlight:title+'부터 차분히 살펴봐요.',basisId:requiredBasis||'s1',
+    paragraphs:[0,1,2,3].map(p=>title+'에 관해 '+index+'번 장면의 '+p+'번째 이야기예요. '+'먼저 확인할 조건이 달라지면 해온 일에서 어떤 부분을 바꿔볼지 차분히 돌아봐요. '.repeat(4))}));
+   return {ok:true,json:async()=>({status:'completed',output:[{type:'function_call',name:'write_featured_report',arguments:JSON.stringify({chapters})}]})};
+  }});
+  assert.equal(requests,1);
+  assert.equal(ready.questionsLeft,3);
+  assert.equal(ready.report.body.length,5);
+  if(consultant==='dogyeom'){
+   assert.equal(ready.report.calendar.rows.length,12);
+   assert(!ready.report.calendar.pillars.hour);
+   assert(ready.report.calendar.focuses.every(item=>item.reason&&item.action&&item.check));
+  }else assert.equal(ready.report.calendar,undefined);
+  const reserve=()=>f.db.runTransaction(tx=>service.reserve(f.db,tx,'member',id,1,{aiFreeUsed:2,aiQuestionCredits:7}));
+  const charges=await Promise.all([reserve(),reserve(),reserve()]);
+  assert.deepEqual(charges.map(r=>r.reportQuestionsLeft),[2,1,0]);
+  assert(charges.every(r=>r.consultantId===consultant&&r.freeUsed===2&&r.questionCreditsLeft===7));
+  await assert.rejects(reserve,{code:'FEATURED_REPORT_QUESTIONS_USED'});
+  assert.equal((await f.notify(9,event)).body,'SUCCESS');
+  assert.equal((await service.run(f.db,'member',status)).state,'refunded');
+  await assert.rejects(reserve,{code:'FEATURED_REPORT_REQUIRED'});
+ }
+});
+
+test('신년 주요 시기와 10년 흐름은 계산 구간과 출생값에 맞춰 정한다',()=>{
+ const {calculate}=require('../lib/newyear-calculation'), {buildDecisionGuide}=require('../lib/newyear-decision-guide');
+ const base=seohwaComparison.profile;
+ const natal=calculate(base), guide=buildDecisionGuide(natal), other=buildDecisionGuide(calculate({...base,d:2}));
+ assert.deepEqual(guide.years.map(row=>row.year),[2027,2028,2029,2030,2031,2032,2033,2034,2035,2036]);
+ assert.equal(guide.years[0].ganZhi,natal.annual.ganZhi);
+ assert.notDeepEqual(guide.years.map(row=>row.basis),other.years.map(row=>row.basis));
+ for(const {windows} of guide.areas){
+  assert.equal(windows.length,3);
+  for(const w of windows)assert(natal.months[w.month-1].segments.some(s=>s.from.startsWith(w.from)&&s.untilExclusive.startsWith(w.untilExclusive)));
+ }
+ assert.equal(buildDecisionGuide(null),null);
+});
 const prepareDate={operation:'prepare',comparison:dateComparison,checkout:true};
 test('comparison stays free to preview, single-order purchases are blocked while paused, and existing premium can save',async()=>{
  const f=fixture();
