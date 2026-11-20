@@ -89,7 +89,9 @@ test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 �
  assert.equal((await seohwa.run(f.db,'member',{operation:'open',id})).state,'paid');
  const result=seohwa.generate(f.db,'member',id,settings);
  await started;
- assert.equal((await seohwa.generate(f.db,'member',id,settings)).state,'generating');
+ const running=await seohwa.generate(f.db,'member',id,settings);
+ assert.equal(running.state,'generating');
+ assert.ok(Number.isFinite(running.startedAtMs));
  finish();
  const full=await result;
  assert.equal(providerCalls,1);
