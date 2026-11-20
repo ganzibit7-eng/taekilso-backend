@@ -2,7 +2,7 @@
 // HTTP transport only. Authentication, entitlements, generation and payment handlers stay unchanged.
 const http=require('node:http'),net=require('node:net');
 const ROUTES=Object.freeze([
- 'admin-member-security','admin-report','admin-user-action','ai-chat',
+ 'admin-member-security','admin-report','admin-user-action','ai-chat','date-report',
  'kakao-custom-token','member-access-status','member-last-seen','member-self-delete',
  'payapp-feedback','premium-status','premium-usage'
 ]);
