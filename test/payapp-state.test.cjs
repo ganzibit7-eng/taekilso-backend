@@ -136,6 +136,33 @@ test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 �
 });
 const dateComparison={event:'결혼식',days:['2027-05-15','2027-05-16','2027-05-23'],mine:'화',partner:'목'};
 
+test('신년운세 단품의 승인·중복 통보·환불은 해당 리포트만 바꾼다',async()=>{
+ const f=fixture();
+ const annual=require('../lib/newyear-purchase'),account=require('../lib/account-report');
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const existing=f.rows.get('users/member');
+ const input={operation:'prepare',comparison:annual.comparison,allowResume:true,checkout:true};
+ const results=await Promise.all([account.run(annual.CONFIG,f.db,'member',input),account.run(annual.CONFIG,f.db,'member',input)]);
+ const created=results.find(result=>result.state==='checkout');
+ assert.equal(created.price,6900);
+ assert.equal(results.filter(result=>result.state==='pending').length,1);
+ const event={var1:created.orderId,price:6900,goodname:annual.CONFIG.name};
+ assert.equal(await annual.entitled(f.db,'member'),false);
+ assert.equal(await annual.paymentState(f.db,'someone-else',created.orderId),'missing');
+ assert.equal((await f.notify(4,{...event,price:8900})).body,'INVALID_PRICE');
+ assert.equal((await f.notify(4,event)).body,'SUCCESS');
+ assert.equal((await f.notify(4,event)).body,'SUCCESS');
+ assert.equal(await annual.entitled(f.db,'member'),true);
+ assert.equal(await annual.paymentState(f.db,'member',created.orderId),'paid');
+ assert.equal(f.rows.get('stats/counters').revenue,6900);
+ assert.deepEqual(f.rows.get('users/member'),existing);
+ assert.equal((await f.notify(9,event)).body,'SUCCESS');
+ assert.equal(await annual.entitled(f.db,'member'),false);
+ assert.equal(await annual.paymentState(f.db,'member',created.orderId),'cancelled');
+ assert.equal(f.rows.get('stats/counters').revenue,0);
+ assert.deepEqual(f.rows.get('users/member'),existing);
+});
+
 test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당 상담사로 한정된다',async()=>{
  for(const consultant of ['dogyeom','ijun','mujin']){
   const f=fixture(), service=seohwa.reports.get(consultant);
