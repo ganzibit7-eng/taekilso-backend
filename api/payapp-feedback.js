@@ -7,7 +7,7 @@ const reports=Object.fromEntries([require('../lib/date-report').CONFIG,require('
 let db=null,initError=null;
 try{if(!admin.apps.length)admin.initializeApp({credential:admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))});db=admin.firestore();}catch(e){initError=e;}
 const PRODUCTS={
- taekilso_premium_30days:{amounts:[8900],names:['택일소 프리미엄 30일 이용권','2027 신년상담 · 30일 이용권']},
+ taekilso_premium_30days:{amounts:[8900],names:['택일소 프리미엄 30일 이용권','2027 신년상담 · 30일 이용권','2027 신년운세 · 30일 이용권']},
  ai_question_pack_5:{amounts:[1900],names:['AI 질문권 5개']},
  // The legacy amount is valid only against an order already stored at that price.
  ai_question_pack_10:{amounts:[2500,3200],names:['AI 질문권 10개']},
