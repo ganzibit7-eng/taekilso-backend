@@ -1,13 +1,15 @@
 'use strict';
 const admin=require('firebase-admin'),crypto=require('node:crypto');
 const entitlement=require('../lib/payment-entitlements');
+const dateReport=require('../lib/date-report');
 let db=null,initError=null;
 try{if(!admin.apps.length)admin.initializeApp({credential:admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))});db=admin.firestore();}catch(e){initError=e;}
 const PRODUCTS={
  taekilso_premium_30days:{amounts:[8900],names:['택일소 프리미엄 30일 이용권','2027 신년상담 · 30일 이용권']},
  ai_question_pack_5:{amounts:[1900],names:['AI 질문권 5개']},
  // The legacy amount is valid only against an order already stored at that price.
- ai_question_pack_10:{amounts:[2500,3200],names:['AI 질문권 10개']}
+ ai_question_pack_10:{amounts:[2500,3200],names:['AI 질문권 10개']},
+ [dateReport.PRODUCT]:{amounts:[dateReport.PRICE],names:[dateReport.NAME]}
 };
 const value=(b,k)=>String(b?.[k]??'').trim();
 function safeEqual(a,b){const x=Buffer.from(String(a||'')),y=Buffer.from(String(b||''));return !!x.length&&x.length===y.length&&crypto.timingSafeEqual(x,y);}
@@ -49,15 +51,25 @@ module.exports=async(req,res)=>{
    if(order.mul_no&&String(order.mul_no)!==originalNo)throw new Error('TRANSACTION_MISMATCH');
    if(event.exists)return;
    const now=Date.now(),userRef=db.collection('users').doc(order.uid),userSnap=await tx.get(userRef),user=userSnap.exists?userSnap.data():{};
+   const dateOrder=order.product===dateReport.PRODUCT;
+   if(dateOrder && (typeof order.dateReportId!=='string'||!/^[a-f0-9]{64}$/.test(order.dateReportId)))throw new Error('INVALID_ORDER_DATA');
+   const reportRef=dateOrder?userRef.collection(dateReport.COLLECTION).doc(order.dateReportId):null;
+   const report=reportRef?(await tx.get(reportRef)).data():null;
    const terminal=entitlement.isRefunded(order);
    if(state===4&&!terminal&&order.status!=='paid'){
     if(order.status!=='pending')throw new Error('ORDER_NOT_PENDING');
     // Do not recreate an account removed while its payment was in flight.
     let accountExists=true;
     if(typeof admin.auth==='function'){try{await admin.auth().getUser(order.uid);}catch(e){if(e.code==='auth/user-not-found')accountExists=false;else throw e;}}
-    const patch=entitlement.grantPatch(user,orderId,order.product,now,order.planVersion);
-    if(accountExists)tx.set(userRef,{...patch,lastOrderId:orderId,lastPurchaseAt:now,lastVerificationMethod:order.product==='taekilso_premium_30days'?'server-verified':user.lastVerificationMethod||'server-verified',lastMulNoGranted:mulNo},{merge:true});
-    tx.update(orderRef,{status:'paid',mul_no:mulNo,pay_state:4,lastPayState:4,paidAtMs:now,entitlementVersion:1,entitlementGranted:accountExists,entitlementReviewRequired:!accountExists,pay_type:value(body,'pay_type').slice(0,20),pay_date:value(body,'pay_date').slice(0,40),updatedAt:admin.firestore.FieldValue.serverTimestamp()});
+    let granted=accountExists;
+    if(dateOrder){
+     granted=accountExists&&userSnap.exists&&!!report&&!report.ready;
+     if(granted)tx.update(reportRef,{ready:true,readyAtMs:now,state:'ready',paidOrderId:orderId});
+    }else if(accountExists){
+     const patch=entitlement.grantPatch(user,orderId,order.product,now,order.planVersion);
+     tx.set(userRef,{...patch,lastOrderId:orderId,lastPurchaseAt:now,lastVerificationMethod:order.product==='taekilso_premium_30days'?'server-verified':user.lastVerificationMethod||'server-verified',lastMulNoGranted:mulNo},{merge:true});
+    }
+    tx.update(orderRef,{status:'paid',mul_no:mulNo,pay_state:4,lastPayState:4,paidAtMs:now,entitlementVersion:1,entitlementGranted:granted,entitlementReviewRequired:!granted,pay_type:value(body,'pay_type').slice(0,20),pay_date:value(body,'pay_date').slice(0,40),updatedAt:admin.firestore.FieldValue.serverTimestamp()});
     tx.set(db.collection('stats').doc('counters'),{purchases:admin.firestore.FieldValue.increment(1),revenue:admin.firestore.FieldValue.increment(amount),purchasesByProduct:{[order.product]:admin.firestore.FieldValue.increment(1)}},{merge:true});
    }else if(cancellation){
     const alreadyFull=['cancelled','refunded'].includes(order.status),priorRefund=Math.max(0,Number(order.refundedAmount)||0);
@@ -66,7 +78,11 @@ module.exports=async(req,res)=>{
     const status=partial&&refundedAmount<amount?'partially_refunded':priorGrant||order.paidAtMs?'refunded':'cancelled';
     if(!alreadyFull){
      let review=!!order.entitlementReviewRequired;
-     if(priorGrant&&!order.entitlementRevokedAtMs&&userSnap.exists){const revoked=entitlement.revokePatch(user,orderId,order,now);tx.set(userRef,{...revoked.patch,...(revoked.needsReview?{entitlementReviewRequired:true}: {})},{merge:true});review=review||revoked.needsReview;}
+     if(dateOrder){
+      if(report?.paidOrderId===orderId||(!report?.ready&&report?.orderId===orderId)) {
+       tx.update(reportRef,{ready:false,readyAtMs:0,state:status,paidOrderId:null});
+      }
+     }else if(priorGrant&&!order.entitlementRevokedAtMs&&userSnap.exists){const revoked=entitlement.revokePatch(user,orderId,order,now);tx.set(userRef,{...revoked.patch,...(revoked.needsReview?{entitlementReviewRequired:true}: {})},{merge:true});review=review||revoked.needsReview;}
      tx.update(orderRef,{status,lastPayState:state,lastMulNo:mulNo,mul_no:order.mul_no||originalNo,refundedAmount,entitlementRevokedAtMs:order.entitlementRevokedAtMs||now,entitlementReviewRequired:review,cancelledAtMs:now,updatedAt:admin.firestore.FieldValue.serverTimestamp()});
      if(order.paidAtMs||order.status==='paid'){
       const refundDelta=Math.max(0,refundedAmount-priorRefund),firstRefund=!order.entitlementRevokedAtMs;

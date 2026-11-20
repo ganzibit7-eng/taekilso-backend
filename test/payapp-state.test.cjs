@@ -3,8 +3,9 @@ const {hasPass}=require('../lib/newyear-access');
 function fixture(options={}){const rows=new Map([['users/member',{premium:false}],['paymentOrders/TAK-TEST-ORDER',{uid:'member',product:'taekilso_premium_30days',amount:8900,status:'pending'}]]);let queue=Promise.resolve();
  function apply(old,value){if(value&&typeof value==='object'&&'increment'in value)return (Number(old)||0)+value.increment;if(value&&typeof value==='object'&&!Array.isArray(value)&&!(value instanceof Date)){const result={...old};for(const [k,v]of Object.entries(value))result[k]=apply(result[k],v);return result;}return value;}
  function put(key,value,merge=true){rows.set(key,apply(merge?rows.get(key):{},value));}
- const ref=key=>({async get(){return {exists:rows.has(key),data:()=>rows.get(key)}},async set(v,o){put(key,v,o?.merge)},async update(v){put(key,v)},key});
- const db={collection:col=>({doc:id=>ref(col+'/'+id),where(field,op,value){return {limit(){return this},async get(){return {docs:[...rows].filter(([k,v])=>k.startsWith(col+'/')&&v[field]===value).map(([,v])=>({data:()=>v}))}}}}}),runTransaction(fn){const job=queue.then(()=>fn({get:r=>r.get(),set(r,v,o){put(r.key,v,o?.merge)},update(r,v){put(r.key,v)}}));queue=job.catch(()=>{});return job}};
+ const ref=key=>({id:key.split('/').at(-1),async get(){return {id:this.id,exists:rows.has(key),data:()=>rows.get(key)}},async set(v,o){put(key,v,o?.merge)},async update(v){put(key,v)},collection:name=>collection(key+'/'+name),key});
+ const collection=col=>({doc:id=>ref(col+'/'+id),where(field,op,value){return {limit(){return this},orderBy(){return this},async get(){return {docs:[...rows].filter(([k,v])=>k.startsWith(col+'/')&&(op==='>'?v[field]>value:v[field]===value)).map(([k,v])=>({id:k.split('/').at(-1),data:()=>v}))}}}}});
+ const db={collection,runTransaction(fn){const job=queue.then(()=>fn({get:r=>r.get(),set(r,v,o){put(r.key,v,o?.merge)},create(r,v){assert(!rows.has(r.key));put(r.key,v,false)},update(r,v){put(r.key,v)}}));queue=job.catch(()=>{});return job}};
  const admin={apps:[{}],firestore:()=>db};if(options.deleted)admin.auth=()=>({async getUser(){throw Object.assign(new Error('gone'),{code:'auth/user-not-found'})}});admin.firestore.FieldValue={increment:n=>({increment:n}),serverTimestamp:()=>Date.now()};
  const filename=path.resolve(__dirname,'../api/payapp-feedback.js'),realRequire=createRequire(filename),context={module:{exports:{}},require:n=>n==='firebase-admin'?admin:realRequire(n),process:{env:{PAYAPP_LINKVAL:'test-only'}},Buffer,console:{error(){},warn(){},log(){}}};vm.runInNewContext(fs.readFileSync(filename,'utf8'),context,{filename});
  async function notify(state,override={}){const r={setHeader(){},status(n){this.code=n;return this},send(v){this.body=v;return this}};await context.module.exports({method:'POST',body:{userid:'green5797',linkval:'test-only',var1:'TAK-TEST-ORDER',goodname:'2027 신년상담 · 30일 이용권',price:8900,pay_state:state,mul_no:'synthetic',...override}},r);return r;}
@@ -44,4 +45,46 @@ test('payment preserves legacy time in front of a capped new pass, including aft
  assert.deepEqual(Array.from(member.premiumLots,lot=>lot.planVersion),[undefined,2]);
  assert.equal((await f.notify(9)).body,'SUCCESS');
  assert.equal(f.rows.get('users/member').premiumUntil,previous);
+});
+const dateReport=require('../lib/date-report');
+const dateComparison={event:'결혼식',days:['2027-05-15','2027-05-16','2027-05-23'],mine:'화',partner:'목'};
+const prepareDate={operation:'prepare',comparison:dateComparison,checkout:true};
+test('comparison stays free to preview, single-order purchases are blocked while paused, and existing premium can save',async()=>{
+ const f=fixture();
+ assert.deepEqual(await dateReport.run(f.db,'member',prepareDate),{state:'paused'});
+ f.rows.set('siteSettings/checkout',{enabled:false});
+ assert.deepEqual(await dateReport.run(f.db,'member',prepareDate),{state:'paused'});
+ await f.notify(4);
+ const saved=await dateReport.run(f.db,'member',prepareDate);
+ assert.equal(saved.state,'ready');
+ assert.equal(saved.report.candidates.length,3);
+ assert.equal(f.rows.get('users/member').aiQuestionCredits,undefined);
+ assert.equal([...f.rows.keys()].filter(k=>k.startsWith('paymentOrders/')).length,1);
+ assert.equal((await dateReport.run(f.db,'member',{operation:'list'})).reports.length,1);
+});
+test('a single payment issues one account-bound date report; refund removes only that report',async()=>{
+ const f=fixture();
+ f.rows.set('users/member',{premium:false,aiQuestionCredits:7});
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const attempts=await Promise.all([dateReport.run(f.db,'member',prepareDate),dateReport.run(f.db,'member',prepareDate)]);
+ const purchase=attempts.find(a=>a.state==='checkout');
+ assert(purchase);
+ assert.equal(purchase.price,3900);
+ assert.equal(attempts.filter(a=>a.state==='pending').length,1);
+ assert.deepEqual(await dateReport.run(f.db,'member',{operation:'open',id:purchase.id}),{state:'pending'});
+ await assert.rejects(dateReport.run(f.db,'another-member',{operation:'open',id:purchase.id}),{code:'REPORT_NOT_FOUND'});
+ const pay={var1:purchase.orderId,price:3900,goodname:purchase.name};
+ assert.equal((await f.notify(4,{...pay,price:3800})).body,'INVALID_PRICE');
+ assert.equal((await f.notify(4,pay)).body,'SUCCESS');
+ assert.equal((await f.notify(4,pay)).body,'SUCCESS');
+ assert.equal((await dateReport.run(f.db,'member',{operation:'list'})).reports.length,1);
+ assert.equal((await dateReport.run(f.db,'member',prepareDate)).state,'ready');
+ assert.equal(f.rows.get('stats/counters').revenue,3900);
+ assert.equal(f.rows.get('users/member').aiQuestionCredits,7);
+ assert.equal(f.rows.get('users/member').premium,false);
+ assert.equal((await f.notify(9,pay)).body,'SUCCESS');
+ assert.equal((await dateReport.run(f.db,'member',{operation:'open',id:purchase.id})).state,'refunded');
+ assert.equal((await dateReport.run(f.db,'member',{operation:'list'})).reports.length,0);
+ assert.equal(f.rows.get('stats/counters').revenue,0);
+ assert.equal(f.rows.get('users/member').aiQuestionCredits,7);
 });
