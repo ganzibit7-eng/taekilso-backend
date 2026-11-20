@@ -6,7 +6,7 @@ const profile={name:'검증용',y:1990,m:1,d:1,calType:'solar',hourValue:'unknow
 function memory(initial={}){
  const rows=new Map(Object.entries(initial)),events=[];let queue=Promise.resolve();
  function put(key,value,merge){const old=rows.get(key)||{},next=merge?{...old}:{};for(const [k,v]of Object.entries(value))next[k]=v&&typeof v==='object'&&'__increment'in v?(Number(old[k])||0)+v.__increment:v;rows.set(key,next);}
- function ref(key){return {key,async get(){return snap(key)},async set(v,o){put(key,v,o?.merge)},async delete(){rows.delete(key)}};}
+ function ref(key){return {key,async get(){return snap(key)},async set(v,o){put(key,v,o?.merge)},async delete(){rows.delete(key)},collection:name=>db.collection(key+'/'+name)};}
  function snap(key){return {exists:rows.has(key),data:()=>rows.get(key),id:key.split('/').at(-1),ref:ref(key)};}
  const db={collection(col){let filters=[],limit=Infinity;return {doc:id=>ref(col+'/'+id),where(k,op,v){assert.equal(op,'==');filters.push([k,v]);return this},limit(n){limit=n;return this},async get(){return {docs:[...rows.keys()].filter(k=>k.startsWith(col+'/')&&filters.every(([field,v])=>rows.get(k)[field]===v)).slice(0,limit).map(snap)}}}},runTransaction(fn){const run=queue.then(()=>fn({get:r=>r.get(),set(r,v,o){events.push(['set',r.key]);put(r.key,v,o?.merge)},update(r,v){events.push(['update',r.key]);put(r.key,v,true)}}));queue=run.catch(()=>{});return run}};return {db,rows,events};
 }
@@ -53,6 +53,47 @@ function chatFixture(user,reply='일반 상담 답변',identity={uid:'member',em
 }
 
 const quotaRequest=()=>({method:'POST',headers:{authorization:'Bearer account'},body:{message:'이직할 때 현실적인 선택 기준을 알려줘',sajuProfile:profile}});
+
+test('featured advisor chat requires its own purchased report and never consumes general questions',async()=>{
+ const {reports}=require('../lib/seohwa-report');
+ const balances={aiFreeUsed:0,aiQuestionCredits:7};
+ for(const consultantId of reports.keys()){
+  const f=chatFixture({...premium,...balances}), original=f.rows.get('users/member');
+  const req=quotaRequest();req.body.consultantId=consultantId;
+  const blocked=res();await f.handler(req,blocked);
+  assert.equal(blocked.code,403);
+  assert.equal(blocked.body.error,'FEATURED_REPORT_PURCHASE_REQUIRED');
+  assert.equal(blocked.body.usageCharged,false);
+  assert.equal(f.events.length,0);assert.equal(f.calls(),0);
+  const legacy=consultantId==='seohwa', service=reports.get(consultantId);
+  const orderKey=legacy?'seohwaReportId':'featuredReportId', id='a'.repeat(64);
+  req.body[orderKey]=id;
+  const invalid=res();await f.handler(req,invalid);
+  assert.equal(invalid.code,403);assert.equal(f.calls(),0);
+
+  const seed=service.calculate(service.validate({profile,choice:0}));
+  const reportKey='users/member/'+service.CONFIG.collection+'/'+id;
+  const paidKey='paymentOrders/verified-report';
+  f.rows.set(reportKey,{ready:true,paidOrderId:'verified-report',questionsUsed:2,report:{...seed,body:[]}});
+  f.rows.set(paidKey,{uid:'someone-else',product:service.CONFIG.product,amount:5900,[orderKey]:id,
+    entitlementGranted:true,status:'paid',mul_no:'verified-transaction',pay_state:4});
+  const foreign=res();await f.handler(req,foreign);
+  assert.equal(foreign.code,403);assert.equal(f.calls(),0);
+  f.rows.get(paidKey).uid='member';
+  const allowed=res();await f.handler(req,allowed);
+  assert.equal(allowed.code,200);
+  assert.equal(allowed.body[legacy?'seohwaQuestionsLeft':'featuredReportQuestionsLeft'],0);
+  assert.equal(f.rows.get(reportKey).questionsUsed,3);
+  const spent=res();await f.handler(req,spent);
+  assert.equal(spent.code,403);assert.equal(f.calls(),1);
+  assert.equal(f.rows.get('users/member').aiFreeUsed,original.aiFreeUsed);
+  assert.equal(f.rows.get('users/member').aiQuestionCredits,original.aiQuestionCredits);
+ }
+ const general=chatFixture({premium:false,aiFreeUsed:0});
+ const req=quotaRequest();req.body.consultantId='daon';
+ const allowed=res();await general.handler(req,allowed);
+ assert.equal(allowed.code,200);assert.equal(general.rows.get('users/member').aiFreeUsed,1);
+});
 
 test('unsupported personal calculations do not consume free or purchased questions or invoke Claude',async()=>{
  for(const user of [{premium:false,aiFreeUsed:0},{premium:false,aiFreeUsed:3,aiQuestionCredits:7}]){const f=chatFixture(user),r=res();const req=quotaRequest();req.body.message='내 용신을 계산해서 알려줘';await f.handler(req,r);assert.equal(r.code,200);assert.equal(r.body.usageCharged,false);assert.equal(r.body.stopReason,'server_capability');assert.equal(f.calls(),0);assert.deepEqual(f.rows.get('users/member'),{aiTransferConsent:activeConsent,...user});assert.equal(f.events.length,0);}

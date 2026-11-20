@@ -159,6 +159,11 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
    const req=JSON.parse(settings.body);
    assert(!JSON.stringify(req).includes('1990'));
    const input=JSON.parse(req.input[0].content);
+   if(consultant==='dogyeom'){
+    assert.deepEqual(input.wealth_judgment.timing.map(item=>item.kind),['income','margin','risk']);
+    assert(input.wealth_judgment.timing.every(item=>item.basis&&item.talk&&!item.from));
+    assert(input.chapterPlan.every(chapter=>chapter.wealthFocus));
+   }else assert.equal(input.wealth_judgment,undefined);
    const chapters=input.chapterPlan.map(({requiredBasis,title},index)=>({highlight:title+'부터 차분히 살펴봐요.',basisId:requiredBasis||'s1',
     paragraphs:[0,1,2,3].map(p=>title+'에 관해 '+index+'번 장면의 '+p+'번째 이야기예요. '+'먼저 확인할 조건이 달라지면 해온 일에서 어떤 부분을 바꿔볼지 차분히 돌아봐요. '.repeat(4))}));
    return {ok:true,json:async()=>({status:'completed',output:[{type:'function_call',name:'write_featured_report',arguments:JSON.stringify({chapters})}]})};
@@ -170,6 +175,11 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
    assert.equal(ready.report.calendar.rows.length,12);
    assert(!ready.report.calendar.pillars.hour);
    assert(ready.report.calendar.focuses.every(item=>item.reason&&item.action&&item.check));
+   const saved=f.rows.get('users/member/dogyeomReports/'+id);
+   const {version,judgment,...oldCalendar}=saved.report.calendar;
+   f.rows.set('users/member/dogyeomReports/'+id,{...saved,report:{...saved.report,calendar:oldCalendar}});
+   assert.deepEqual((await service.run(f.db,'member',{operation:'open',id})).report,ready.report);
+   assert.equal(requests,1);
   }else assert.equal(ready.report.calendar,undefined);
   const reserve=()=>f.db.runTransaction(tx=>service.reserve(f.db,tx,'member',id,1,{aiFreeUsed:2,aiQuestionCredits:7}));
   const charges=await Promise.all([reserve(),reserve(),reserve()]);
@@ -179,6 +189,26 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
   assert.equal((await f.notify(9,event)).body,'SUCCESS');
   assert.equal((await service.run(f.db,'member',status)).state,'refunded');
   await assert.rejects(reserve,{code:'FEATURED_REPORT_REQUIRED'});
+ }
+});
+
+test('도겸은 공통 원국에 따라 수입 통로와 절기 구간을 따로 읽는다',()=>{
+ const service=seohwa.reports.get('dogyeom'),base=seohwaComparison.profile;
+ const a=service.calculate({profile:base,choice:0}).calendar;
+ const b=service.calculate({profile:{...base,d:4},choice:0}).calendar;
+ const boundary=service.calculate({profile:{...base,d:5},choice:0}).calendar;
+ assert.equal(a.judgment.route.key,'craft');
+ assert.equal(b.judgment.route.key,'flexible');
+ assert.notDeepEqual(a.judgment.timing.map(item=>item.from),b.judgment.timing.map(item=>item.from));
+ assert(!boundary.pillars.month);
+ const {calculate}=require('../lib/newyear-calculation');
+ for(const [profile,calendar] of [[base,a],[{...base,d:4},b],[{...base,d:5},boundary]]){
+  const periods=calculate(profile).months.flatMap(month=>month.segments);
+  for(const window of calendar.judgment.timing){
+   assert(periods.some(item=>item.from===window.from&&item.monthGanZhi===window.ganZhi));
+   assert(periods.some(item=>item.untilExclusive===window.untilExclusive&&item.monthGanZhi===window.ganZhi));
+   assert(window.untilExclusive>window.from);
+  }
  }
 });
 
