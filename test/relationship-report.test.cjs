@@ -24,7 +24,7 @@ test('the expanded report contains twelve grounded chapters and updates old copi
  const length=report=>[report.summary,...report.strengths.flatMap(Object.values),...report.friction.flatMap(Object.values),
   ...report.conversations.flatMap(Object.values),report.nextStep,
   ...report.chapters.flatMap(c=>[c.title,c.scene,c.reading,c.first,c.second,c.action]),...report.routine.flatMap(Object.values)].join('').length;
- assert.equal(same.edition,2);
+ assert.equal(same.edition,3);
  assert.equal(same.chapters.length,12);
  assert.equal(new Set(same.chapters.map(c=>c.title)).size,12);
  assert.equal(new Set(same.chapters.map(c=>c.action)).size,12);
@@ -34,6 +34,11 @@ test('the expanded report contains twelve grounded chapters and updates old copi
  assert.notEqual(same.chapters.find(c=>c.basis===0).reading,mixed.chapters.find(c=>c.basis===0).reading);
  const {edition,chapters,routine,...old}=mixed;
  assert.deepEqual(present(old),mixed);
+ assert.deepEqual(present({...old,edition:2}),mixed);
+ for(const id of ['contact','plans']){
+   const variants=[0,2,6].map(second=>calculate({first:0,second}).chapters.find(c=>c.id===id));
+   for(const key of ['first','second','action']) assert.equal(new Set(variants.map(c=>c[key])).size,3);
+ }
  assert(!Object.hasOwn(old,'chapters'));
  assert.equal(present(mixed),mixed);
 });

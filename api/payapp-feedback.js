@@ -1,5 +1,6 @@
 'use strict';
 const admin=require('firebase-admin'),crypto=require('node:crypto');
+const {URL}=require('node:url');
 const entitlement=require('../lib/payment-entitlements');
 const reports=Object.fromEntries([require('../lib/date-report').CONFIG,require('../lib/relationship-report').CONFIG]
  .map(config=>[config.product,config]));
@@ -13,6 +14,15 @@ const PRODUCTS={
  ...Object.fromEntries(Object.values(reports).map(config=>[config.product,{amounts:[config.price],names:[config.name]}]))
 };
 const value=(b,k)=>String(b?.[k]??'').trim();
+function resumeUrl(raw) {
+ try {
+  const url=new URL(raw);
+  if(!['http:','https:'].includes(url.protocol) || !['payapp.kr','www.payapp.kr','lite.payapp.kr'].includes(url.hostname) ||
+     url.username || url.password || url.port || url.pathname==='/')return null;
+  url.protocol='https:';
+  return url.href;
+ }catch{return null;}
+}
 function safeEqual(a,b){const x=Buffer.from(String(a||'')),y=Buffer.from(String(b||''));return !!x.length&&x.length===y.length&&crypto.timingSafeEqual(x,y);}
 function signatureValid(body){
  const key=process.env.PAYAPP_REQUESTKEY;
@@ -57,6 +67,7 @@ module.exports=async(req,res)=>{
    if(reportOrder && (typeof reportId!=='string'||!/^[a-f0-9]{64}$/.test(reportId)))throw new Error('INVALID_ORDER_DATA');
    const reportRef=reportOrder?userRef.collection(reportOrder.collection).doc(reportId):null;
    const report=reportRef?(await tx.get(reportRef)).data():null;
+   if(reportOrder && state===1 && report?.orderId!==orderId) throw new Error('ORDER_NOT_PENDING');
    const terminal=entitlement.isRefunded(order);
    if(state===4&&!terminal&&order.status!=='paid'){
     if(order.status!=='pending')throw new Error('ORDER_NOT_PENDING');
@@ -91,8 +102,9 @@ module.exports=async(req,res)=>{
       tx.set(db.collection('stats').doc('counters'),{revenue:admin.firestore.FieldValue.increment(-refundDelta),...(firstRefund?{purchases:admin.firestore.FieldValue.increment(-1),purchasesByProduct:{[order.product]:admin.firestore.FieldValue.increment(-1)}}:{})},{merge:true});
      }
     }
-   }else if(!terminal&&order.status!=='paid'){
-    tx.update(orderRef,{lastPayState:state,lastMulNo:mulNo,mul_no:order.mul_no||mulNo,updatedAt:admin.firestore.FieldValue.serverTimestamp()});
+   }else if(!terminal&&order.status!=='paid'&&!(state===1&&Number(order.lastPayState)===10)){
+    const link=reportOrder && state===1 && resumeUrl(value(body,'payurl'));
+    tx.update(orderRef,{lastPayState:state,lastMulNo:mulNo,mul_no:order.mul_no||mulNo,...(link?{resumeUrl:link}:{}),updatedAt:admin.firestore.FieldValue.serverTimestamp()});
    }
    tx.set(eventRef,{orderId,uid:order.uid,state,mulNo,price,receivedAtMs:now,expiresAt:new Date(now+90*86400000)});
   });
