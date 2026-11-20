@@ -148,3 +148,11 @@ test('a signed unpaid report notification resumes the same checkout and an outst
  assert.equal((await relationship.run(f.db,'member',open)).state,'ready');
  assert.equal([...f.rows.values()].filter(x=>x.product===relationship.CONFIG.product).length,1);
 });
+
+test('renamed new year pass keeps the previous PayApp name valid for refunds',async()=>{
+  const f=fixture();
+  assert.equal((await f.notify(4,{goodname:'2027 신년운세 · 30일 이용권'})).body,'SUCCESS');
+  assert.equal(f.rows.get('users/member').premium,true);
+  assert.equal((await f.notify(9)).body,'SUCCESS');
+  assert.equal(f.rows.get('users/member').premium,false);
+});
