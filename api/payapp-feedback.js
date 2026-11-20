@@ -12,7 +12,7 @@ const PRODUCTS={
  ai_question_pack_5:{amounts:[1900],names:['AI 질문권 5개']},
  // The legacy amount is valid only against an order already stored at that price.
  ai_question_pack_10:{amounts:[2500,3200],names:['AI 질문권 10개']},
- ...Object.fromEntries(Object.values(reports).map(config=>[config.product,{amounts:[config.price],names:[config.name]}]))
+ ...Object.fromEntries(Object.values(reports).map(config=>[config.product,{amounts:[config.price],names:[config.name,...(config.payAppNames||[])]}]))
 };
 const value=(b,k)=>String(b?.[k]??'').trim();
 function resumeUrl(raw) {
@@ -112,7 +112,10 @@ module.exports=async(req,res)=>{
   });
   return res.status(200).send('SUCCESS');
  }catch(e){
-  if(['UNKNOWN_ORDER','INVALID_ORDER_DATA','INVALID_PRODUCT_NAME','INVALID_PRICE','TRANSACTION_MISMATCH','ORDER_NOT_PENDING'].includes(e.message))return res.status(200).send(e.message);
+  if(['UNKNOWN_ORDER','INVALID_ORDER_DATA','INVALID_PRODUCT_NAME','INVALID_PRICE','TRANSACTION_MISMATCH','ORDER_NOT_PENDING'].includes(e.message)) {
+   console.warn('[payapp-feedback] rejected:',e.message);
+   return res.status(200).send(e.message);
+  }
   console.error('[payapp-feedback] transaction failed:',e.code||e.message);return res.status(500).send('ERROR');
  }
 };
