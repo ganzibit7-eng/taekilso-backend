@@ -46,3 +46,30 @@ test('other people stay separate and unavailable topics invent no evidence',()=>
  for(const a of b.topic_assessments)assert(b.charts.find(c=>c.person_id===a.person_id).facts.some(f=>f.id===a.supporting_fact_ids[0]));
  assert.deepEqual(rules.select(b,'medical'),[]);assert.deepEqual(rules.select({charts:[]},'money'),[]);
 });
+
+test('ordinary outcome questions get an outlook grounded in the selected chart and topic',()=>{
+ const cases=[
+  ['집을 이사하고 싶은데 기존집이 매매가 될까요','home_sale'],
+  ['대출도 남았는데 아파트가 팔릴까요?','home_sale'],
+  ['이사 전에 12월 1일까지 집이 팔릴까요?','home_sale'],
+  ['이번 면접에 합격할까요?','career_business'],
+  ['가게가 잘될까요?','career_business'],
+  ['시험에 붙을까요?','study'],
+  ['헤어진 사람과 다시 대화가 이어질까요?','relationship'],
+  ['목표한 돈을 모을 수 있을까요? 가능성이 궁금해요','money']
+ ];
+ for(const [question,topic] of cases){
+  const b=bundle(),a=prompt.assemble(b,[],question);
+  assert.equal(a.topic,topic);assert.match(a.system,/\[성사·기회를 묻는 질문\]/);
+  assert(b.topic_assessments.length);assert(b.topic_assessments.every(r=>r.topic===topic));
+ }
+ assert.equal(prompt.resolveTopic('그럼 성사될까요?',[{role:'user',content:cases[0][0]}]),'home_sale');
+ assert.equal(prompt.topic('집을 팔고 이사할 날짜 두 후보 날짜 비교해줘'),'date_selection');
+ assert.doesNotMatch(prompt.assemble(bundle(),[],'공부 계획을 짜고 싶어요').system,/\[성사·기회를 묻는 질문\]/);
+});
+
+test('outlook quality check distinguishes a disclaimer-led answer from a conditional reading',()=>{
+ assert(output.opensWithDisclaimer('이번 면접의 합격을 단정할 수는 없지만, 경험을 설명할 때 강점이 드러나요.'));
+ assert(output.opensWithDisclaimer('다시 연락이 이어질지는 단정할 수 없어요. 다만 대화할 여지는 있어요.'));
+ assert(!output.opensWithDisclaimer('조건을 하나 열어둘 때 매매 이야기가 진전되기 쉬운 흐름이에요. 매수자의 의도까지 알 수는 없어요.'));
+});

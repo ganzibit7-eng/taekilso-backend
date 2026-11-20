@@ -270,7 +270,11 @@ function getRestrictedFortuneResponse(message) {
   ];
 
   for (const rule of rules) {
-    if (rule.re.test(compact)) return { restricted: true, code: rule.code, reply: rule.reply };
+    // Here 부동산에 내놓다 means listing with an agent, not asking what to invest in.
+    const question = rule.code === 'SPECIFIC_INVESTMENT'
+      ? compact.replace(/부동산(?:중개소|중개사무소)?에(?:서|다가)?(?=.{0,35}(?:내놓|내놨|맡겼|맡겨))/g, '중개소에')
+      : compact;
+    if (rule.re.test(question)) return { restricted: true, code: rule.code, reply: rule.reply };
   }
   return { restricted: false };
 }
