@@ -57,7 +57,7 @@ test('GPT output uses actual source binding and the existing persona renderer; i
  const b=calc.build(body);prompt.assemble(b,[],body.message,'taeyul');let calls=0;
  const answer={status:'answer',headline:'먼저 작은 제안부터 시험해요.',blocks:[{kind:'traditional_interpretation',title:'내가 정할 범위',text:'주도할 수 있는 일이 있다면, 책임질 범위도 함께 정해 보세요.',reference_id:b.topic_assessments[0].id}],options:[],actions:[],follow_up_question:null,data_limitations:[]};
  const result=await service.generate({body,messages:[{role:'user',content:body.message}],key:'fallback',model:payload.model,consultantId:'taeyul',providerEnv:env,fetchImpl:async(_url,o)=>{calls++;assert.equal(JSON.parse(o.body).max_output_tokens,4800);return response(raw(answer));}});
- assert.equal(calls,1);assert(result.evidence.length);assert.match(result.reply,/유|쥬/);assert.doesNotMatch(result.reply,/입니다|합니다/);assert.equal(result.diagnostics.selected_provider,'openai');
+ assert.equal(calls,1);assert(result.evidence.length);assert.match(result.reply,/작게 시작할 방법부터 볼까요\?.*시험해요/);assert.doesNotMatch(result.reply,/오셨어유|쥬|입니다|합니다/);assert.equal(result.diagnostics.selected_provider,'openai');
  answer.blocks[0].reference_id='invented-source';calls=0;await assert.rejects(service.generate({body,messages:[{role:'user',content:body.message}],key:'fallback',model:payload.model,providerEnv:env,fetchImpl:async()=>{calls++;return response(raw(answer));}}),{code:'AI_EVIDENCE_VALIDATION_FAILED'});assert.equal(calls,2);
 });
 test('annual GPT generation preserves twelve months, real calculation echoes and rejects a mismatched year source',async()=>{

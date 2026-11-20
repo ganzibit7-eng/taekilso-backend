@@ -15,7 +15,7 @@ test('followups explain the new question while a topic change receives a full fi
 test('length instructions preserve unsupported-data boundaries, persona and one selected topic',()=>{
  const body={sajuProfile:{y:1990,m:1,d:1,hourValue:'unknown',gender:'unknown',calType:'solar'},message:'이직할 때 제 사주에서 어떤 선택이 잘 맞나요?'};
  const assembled=prompt.assemble(calc.build(body),[],body.message,'taeyul');
- assert.match(assembled.system,/1200~1800자/);assert.match(assembled.system,/자료가 부족하거나 답을 제한해야 하는 질문/);assert.match(assembled.system,/잘 오셨|충청/);
+ assert.match(assembled.system,/1200~1800자/);assert.match(assembled.system,/자료가 부족하거나 답을 제한해야 하는 질문/);assert.match(assembled.system,/느긋하고 실용적인 해요체/);
  assert.doesNotMatch(prompt.OUTPUT,/2~3개 짧은 문단이면 충분|후속 질문은 한 문단/);
  assert.equal(assembled.topic,'career_business');
 });
