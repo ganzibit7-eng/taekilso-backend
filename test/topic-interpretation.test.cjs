@@ -74,3 +74,21 @@ test('outlook quality check distinguishes a disclaimer-led answer from a conditi
  assert(output.opensWithDisclaimer('경험이 강점으로 읽혀요. 합격 자체를 가를 근거는 없지만 방법은 있어요.'));
  assert(!output.opensWithDisclaimer('조건을 하나 열어둘 때 매매 이야기가 진전되기 쉬운 흐름이에요. 매수자의 의도까지 알 수는 없어요.'));
 });
+
+test('same question and advisor receive different grounded readings while explicit advice stays available',()=>{
+ const question='이사하고 싶은데 지금 집 매매가 어떻게 될까요?';
+ const snapshots=[1,3,10].map(d=>{
+  const b=bundle({...profile,d});const a=prompt.assemble(b,[],question,'yeonwoo');
+  assert(b.readingOnly);
+  const data=JSON.parse(a.system.split('[서버 계산 자료]\n')[1].split('\n\n[현재 질문]')[0]);
+  const lenses=data.charts[0].interpretation_assessments.filter(x=>x.topic==='home_sale');
+  assert(lenses.every(x=>x.result.outlook_reading.symbol && x.result.outlook_reading.theme && !x.result.conditional_reading));
+  assert(lenses.every(x=>x.supporting_fact_ids.every(id=>data.charts[0].facts.some(f=>f.id===id))));
+  const sample=response();sample.options=[{label:'옵션제목',suitable_when:'',tradeoff:'',next_action:''}];sample.actions=['중개사에게 물어보세요'];
+  assert.doesNotMatch(output.render(sample,b),/옵션제목|지금 해볼 일/);
+  return lenses.map(x=>x.result.outlook_reading.theme).join('|');
+ });
+ assert.equal(new Set(snapshots).size,3);
+ const b=bundle();prompt.assemble(b,[],'지금 집 매매가 될까요? 제가 준비할 방법도 알려주세요.','yeonwoo');
+ assert(!b.readingOnly);assert(b.outlookRequested);
+});
