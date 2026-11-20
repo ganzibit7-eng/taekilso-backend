@@ -1,7 +1,8 @@
 'use strict';
 const admin=require('firebase-admin'),crypto=require('node:crypto');
 const entitlement=require('../lib/payment-entitlements');
-const dateReport=require('../lib/date-report');
+const reports=Object.fromEntries([require('../lib/date-report').CONFIG,require('../lib/relationship-report').CONFIG]
+ .map(config=>[config.product,config]));
 let db=null,initError=null;
 try{if(!admin.apps.length)admin.initializeApp({credential:admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))});db=admin.firestore();}catch(e){initError=e;}
 const PRODUCTS={
@@ -9,7 +10,7 @@ const PRODUCTS={
  ai_question_pack_5:{amounts:[1900],names:['AI 질문권 5개']},
  // The legacy amount is valid only against an order already stored at that price.
  ai_question_pack_10:{amounts:[2500,3200],names:['AI 질문권 10개']},
- [dateReport.PRODUCT]:{amounts:[dateReport.PRICE],names:[dateReport.NAME]}
+ ...Object.fromEntries(Object.values(reports).map(config=>[config.product,{amounts:[config.price],names:[config.name]}]))
 };
 const value=(b,k)=>String(b?.[k]??'').trim();
 function safeEqual(a,b){const x=Buffer.from(String(a||'')),y=Buffer.from(String(b||''));return !!x.length&&x.length===y.length&&crypto.timingSafeEqual(x,y);}
@@ -51,9 +52,10 @@ module.exports=async(req,res)=>{
    if(order.mul_no&&String(order.mul_no)!==originalNo)throw new Error('TRANSACTION_MISMATCH');
    if(event.exists)return;
    const now=Date.now(),userRef=db.collection('users').doc(order.uid),userSnap=await tx.get(userRef),user=userSnap.exists?userSnap.data():{};
-   const dateOrder=order.product===dateReport.PRODUCT;
-   if(dateOrder && (typeof order.dateReportId!=='string'||!/^[a-f0-9]{64}$/.test(order.dateReportId)))throw new Error('INVALID_ORDER_DATA');
-   const reportRef=dateOrder?userRef.collection(dateReport.COLLECTION).doc(order.dateReportId):null;
+   const reportOrder=reports[order.product];
+   const reportId=reportOrder?order[reportOrder.orderKey]:null;
+   if(reportOrder && (typeof reportId!=='string'||!/^[a-f0-9]{64}$/.test(reportId)))throw new Error('INVALID_ORDER_DATA');
+   const reportRef=reportOrder?userRef.collection(reportOrder.collection).doc(reportId):null;
    const report=reportRef?(await tx.get(reportRef)).data():null;
    const terminal=entitlement.isRefunded(order);
    if(state===4&&!terminal&&order.status!=='paid'){
@@ -62,7 +64,7 @@ module.exports=async(req,res)=>{
     let accountExists=true;
     if(typeof admin.auth==='function'){try{await admin.auth().getUser(order.uid);}catch(e){if(e.code==='auth/user-not-found')accountExists=false;else throw e;}}
     let granted=accountExists;
-    if(dateOrder){
+    if(reportOrder){
      granted=accountExists&&userSnap.exists&&!!report&&!report.ready;
      if(granted)tx.update(reportRef,{ready:true,readyAtMs:now,state:'ready',paidOrderId:orderId});
     }else if(accountExists){
@@ -78,7 +80,7 @@ module.exports=async(req,res)=>{
     const status=partial&&refundedAmount<amount?'partially_refunded':priorGrant||order.paidAtMs?'refunded':'cancelled';
     if(!alreadyFull){
      let review=!!order.entitlementReviewRequired;
-     if(dateOrder){
+     if(reportOrder){
       if(report?.paidOrderId===orderId||(!report?.ready&&report?.orderId===orderId)) {
        tx.update(reportRef,{ready:false,readyAtMs:0,state:status,paidOrderId:null});
       }

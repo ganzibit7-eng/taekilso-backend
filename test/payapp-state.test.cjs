@@ -88,3 +88,31 @@ test('a single payment issues one account-bound date report; refund removes only
  assert.equal(f.rows.get('stats/counters').revenue,0);
  assert.equal(f.rows.get('users/member').aiQuestionCredits,7);
 });
+test('5,900-won relationship report stays paused for everyone and issues only to its purchaser after confirmation',async()=>{
+ const f=fixture();
+ const relationship=require('../lib/relationship-report');
+ const purchaseRequest={operation:'prepare',comparison:{first:2,second:5},checkout:true};
+ await f.notify(4); // Existing premium still applies only to its included benefits.
+ assert.deepEqual(await relationship.run(f.db,'member',purchaseRequest),{state:'paused'});
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const pending=await Promise.all([relationship.run(f.db,'member',purchaseRequest),relationship.run(f.db,'member',purchaseRequest)]);
+ const purchase=pending.find(item=>item.state==='checkout');
+ assert(purchase);
+ assert.equal(purchase.price,5900);
+ assert.equal(pending.filter(item=>item.state==='pending').length,1);
+ assert.deepEqual(await relationship.run(f.db,'member',{operation:'open',id:purchase.id}),{state:'pending'});
+ await assert.rejects(relationship.run(f.db,'other',{operation:'open',id:purchase.id}),{code:'REPORT_NOT_FOUND'});
+ const pay={var1:purchase.orderId,price:5900,goodname:purchase.name};
+ assert.equal((await f.notify(4,{...pay,price:3900})).body,'INVALID_PRICE');
+ assert.equal((await f.notify(4,{...pay,goodname:dateReport.NAME})).body,'INVALID_PRODUCT_NAME');
+ assert.equal((await f.notify(4,pay)).body,'SUCCESS');
+ assert.equal((await f.notify(4,pay)).body,'SUCCESS');
+ const {reports}=await relationship.run(f.db,'member',{operation:'list'});
+ assert.equal(reports.length,1);
+ assert.equal(reports[0].report.conversations.length,3);
+ assert.equal(f.rows.get('stats/counters').revenue,14800);
+ assert.equal((await f.notify(9,pay)).body,'SUCCESS');
+ assert.equal((await relationship.run(f.db,'member',{operation:'list'})).reports.length,0);
+ assert.equal(f.rows.get('users/member').premium,true);
+ assert.equal(f.rows.get('stats/counters').revenue,8900);
+});
