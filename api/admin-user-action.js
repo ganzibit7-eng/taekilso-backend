@@ -386,6 +386,8 @@ module.exports = async (req, res) => {
           premiumUntil:
             0,
 
+          premiumLots: [],
+
           lastAdminPremiumRevokeAt:
             admin.firestore
               .FieldValue

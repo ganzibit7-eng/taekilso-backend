@@ -101,6 +101,58 @@ test('premium quota starts a new bucket exactly at Korean midnight',async()=>{
 test('failed tenth premium answer restores its slot and does not deduct purchased credits',async()=>{
  const f=chatFixture(quotaPremium,'',{uid:'member',email:'member@example.com'},async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})}),()=>quotaTime),key='aiDailyUsage/member_2026-11-11',r=res();f.rows.set(key,{count:9});await f.handler(quotaRequest(),r);assert.equal(r.code,502);assert.equal(f.rows.get(key).count,9);assert.equal(f.rows.get('users/member').aiQuestionCredits,5);
 });
+const {DAY,grantPatch}=require('../lib/payment-entitlements');
+const limitedPass={...quotaPremium,...grantPatch({},'paid','taekilso_premium_30days',quotaTime,2)};
+test('new premium admits the last total slot once across concurrent requests and Korean dates',async()=>{
+ let now=quotaTime;
+ const f=chatFixture(limitedPass,undefined,undefined,undefined,()=>now);
+ f.rows.set('paymentOrders/paid',{...order,planVersion:2,premiumQuestionsUsed:29});
+ const responses=[res(),res(),res()];
+ await Promise.all(responses.map(r=>f.handler(quotaRequest(),r)));
+ assert.equal(f.calls(),1);
+ assert.equal(responses.find(r=>r.code===200).body.premiumTotalUsed,30);
+ assert.equal(responses.filter(r=>r.body.error==='PREMIUM_TOTAL_LIMIT_REACHED').length,2);
+ now+=DAY;
+ const next=res();
+ await f.handler(quotaRequest(),next);
+ assert.equal(next.body.error,'PREMIUM_TOTAL_LIMIT_REACHED');
+ assert.equal(f.calls(),1);
+ assert.equal(f.rows.get('paymentOrders/paid').premiumQuestionsUsed,30);
+ assert.equal(f.rows.get('users/member').aiFreeUsed,1);
+ assert.equal(f.rows.get('users/member').aiQuestionCredits,5);
+});
+test('new premium daily cap applies and failed responses restore both counters',async()=>{
+ const f=chatFixture(limitedPass,'',undefined,async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})}),()=>quotaTime);
+ const daily='aiDailyUsage/member_2026-11-11';
+ f.rows.set('paymentOrders/paid',{...order,planVersion:2,premiumQuestionsUsed:29});
+ f.rows.set(daily,{count:10});
+ const blocked=res();
+ await f.handler(quotaRequest(),blocked);
+ assert.equal(blocked.body.error,'DAILY_LIMIT_REACHED');
+ assert.equal(f.calls(),0);
+ f.rows.set(daily,{count:9});
+ const failed=res();
+ await f.handler(quotaRequest(),failed);
+ assert.equal(failed.code,502);
+ assert.equal(f.rows.get(daily).count,9);
+ assert.equal(f.rows.get('paymentOrders/paid').premiumQuestionsUsed,29);
+});
+test('an existing premium period stays uncapped until the queued purchase starts',async()=>{
+ let now=quotaTime;
+ const member={...quotaPremium,...grantPatch(quotaPremium,'next','taekilso_premium_30days',now,2)};
+ const f=chatFixture(member,undefined,undefined,undefined,()=>now);
+ f.rows.set('paymentOrders/next',{...order,planVersion:2});
+ const legacy=res();
+ await f.handler(quotaRequest(),legacy);
+ assert.equal(legacy.code,200);
+ assert.equal(legacy.body.premiumTotalLimit,undefined);
+ assert.equal(f.rows.get('paymentOrders/next').premiumQuestionsUsed,undefined);
+ now+=DAY;
+ const current=res();
+ await f.handler(quotaRequest(),current);
+ assert.equal(current.body.premiumTotalUsed,1);
+ assert.equal(current.body.premiumTotalLimit,30);
+});
 test('administrator daily allowance remains one hundred despite the premium policy change',async()=>{
  const f=chatFixture(quotaPremium,undefined,{uid:'member',email:'green092432@gmail.com',email_verified:true},undefined,()=>quotaTime),key='aiDailyUsage/member_2026-11-11';f.rows.set(key,{count:99});const last=res();await f.handler(quotaRequest(),last);assert.equal(last.code,200);assert.equal(last.body.premiumDailyLimit,100);const denied=res();await f.handler(quotaRequest(),denied);assert.equal(denied.body.error,'DAILY_LIMIT_REACHED');assert.equal(denied.body.premiumDailyLimit,100);assert.equal(f.calls(),1);
 });

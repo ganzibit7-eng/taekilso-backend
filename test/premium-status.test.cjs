@@ -12,3 +12,13 @@ function fixture(orders,user={premium:false}){
 test('cancelled legacy paid marker or updatedAt cannot recover premium',async()=>{const now=Date.now();for(const order of [{lastPayState:9,createdAtMs:now},{updatedAt:now},{createdAtMs:now-90*DAY,updatedAt:now}]){const f=fixture([order]);const r=await f.request();assert.equal(r.code,200);assert.equal(r.body.active,false);assert.equal(f.rows.get('users/member').premium,false);}});
 test('valid immutable payment recovers an attributed remaining period and admin revocation wins',async()=>{const paid=Date.now()-2*DAY;const f=fixture([{paidAtMs:paid}]);const r=await f.request();assert.equal(r.body.active,true);assert.equal(r.body.recovered,true);assert.equal(r.body.premiumUntil,paid+30*DAY);assert.equal(f.rows.get('users/member').premiumLots[0].orderId,'order0');const revoked=fixture([{paidAtMs:paid}],{premium:false,lastAdminPremiumRevokeAt:paid+DAY});assert.equal((await revoked.request()).body.active,false);});
 test('new purchase after administrator revocation does not resurrect earlier revoked purchases',async()=>{const now=Date.now(),f=fixture([{paidAtMs:now-5*DAY},{paidAtMs:now-DAY}],{premium:false,lastAdminPremiumRevokeAt:now-3*DAY});const r=await f.request();assert.equal(r.body.premiumUntil,now+29*DAY);assert.equal(r.body.paidPremiumOrders,1);});
+test('restoring a capped pass retains the recorded question usage',async()=>{
+ const f=fixture([{paidAtMs:Date.now()-DAY,planVersion:2,premiumQuestionsUsed:23}]);
+ const restored=await f.request();
+ assert.equal(restored.body.recovered,true);
+ assert.equal(restored.body.premiumTotalLimit,30);
+ assert.equal(restored.body.premiumTotalUsed,23);
+ const active=await f.request();
+ assert.equal(active.body.recovered,false);
+ assert.equal(active.body.premiumTotalUsed,23);
+});

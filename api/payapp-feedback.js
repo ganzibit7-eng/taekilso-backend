@@ -4,9 +4,10 @@ const entitlement=require('../lib/payment-entitlements');
 let db=null,initError=null;
 try{if(!admin.apps.length)admin.initializeApp({credential:admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))});db=admin.firestore();}catch(e){initError=e;}
 const PRODUCTS={
- taekilso_premium_30days:{price:8900,names:['택일소 프리미엄 30일 이용권','2027 신년상담 · 30일 이용권']},
- ai_question_pack_5:{price:1900,names:['AI 질문권 5개']},
- ai_question_pack_10:{price:3200,names:['AI 질문권 10개']}
+ taekilso_premium_30days:{amounts:[8900],names:['택일소 프리미엄 30일 이용권','2027 신년상담 · 30일 이용권']},
+ ai_question_pack_5:{amounts:[1900],names:['AI 질문권 5개']},
+ // The legacy amount is valid only against an order already stored at that price.
+ ai_question_pack_10:{amounts:[2500,3200],names:['AI 질문권 10개']}
 };
 const value=(b,k)=>String(b?.[k]??'').trim();
 function safeEqual(a,b){const x=Buffer.from(String(a||'')),y=Buffer.from(String(b||''));return !!x.length&&x.length===y.length&&crypto.timingSafeEqual(x,y);}
@@ -41,9 +42,10 @@ module.exports=async(req,res)=>{
    const snap=await tx.get(orderRef),event=await tx.get(eventRef);
    if(!snap.exists)throw new Error('UNKNOWN_ORDER');
    const order=snap.data(),product=PRODUCTS[order.product];
-   if(!product||!order.uid||order.amount!==product.price)throw new Error('INVALID_ORDER_DATA');
+   if(!product||!order.uid||!product.amounts.includes(order.amount))throw new Error('INVALID_ORDER_DATA');
+   const amount=order.amount;
    if(!product.names.includes(value(body,'goodname')))throw new Error('INVALID_PRODUCT_NAME');
-   if(partial?(!originalNo||Number(value(body,'orig_price'))!==product.price||!Number.isInteger(price)||price<=0||price>product.price):(price!==product.price))throw new Error('INVALID_PRICE');
+   if(partial?(!originalNo||Number(value(body,'orig_price'))!==amount||!Number.isInteger(price)||price<=0||price>amount):(price!==amount))throw new Error('INVALID_PRICE');
    if(order.mul_no&&String(order.mul_no)!==originalNo)throw new Error('TRANSACTION_MISMATCH');
    if(event.exists)return;
    const now=Date.now(),userRef=db.collection('users').doc(order.uid),userSnap=await tx.get(userRef),user=userSnap.exists?userSnap.data():{};
@@ -53,15 +55,15 @@ module.exports=async(req,res)=>{
     // Do not recreate an account removed while its payment was in flight.
     let accountExists=true;
     if(typeof admin.auth==='function'){try{await admin.auth().getUser(order.uid);}catch(e){if(e.code==='auth/user-not-found')accountExists=false;else throw e;}}
-    const patch=entitlement.grantPatch(user,orderId,order.product,now);
+    const patch=entitlement.grantPatch(user,orderId,order.product,now,order.planVersion);
     if(accountExists)tx.set(userRef,{...patch,lastOrderId:orderId,lastPurchaseAt:now,lastVerificationMethod:order.product==='taekilso_premium_30days'?'server-verified':user.lastVerificationMethod||'server-verified',lastMulNoGranted:mulNo},{merge:true});
     tx.update(orderRef,{status:'paid',mul_no:mulNo,pay_state:4,lastPayState:4,paidAtMs:now,entitlementVersion:1,entitlementGranted:accountExists,entitlementReviewRequired:!accountExists,pay_type:value(body,'pay_type').slice(0,20),pay_date:value(body,'pay_date').slice(0,40),updatedAt:admin.firestore.FieldValue.serverTimestamp()});
-    tx.set(db.collection('stats').doc('counters'),{purchases:admin.firestore.FieldValue.increment(1),revenue:admin.firestore.FieldValue.increment(product.price),purchasesByProduct:{[order.product]:admin.firestore.FieldValue.increment(1)}},{merge:true});
+    tx.set(db.collection('stats').doc('counters'),{purchases:admin.firestore.FieldValue.increment(1),revenue:admin.firestore.FieldValue.increment(amount),purchasesByProduct:{[order.product]:admin.firestore.FieldValue.increment(1)}},{merge:true});
    }else if(cancellation){
     const alreadyFull=['cancelled','refunded'].includes(order.status),priorRefund=Math.max(0,Number(order.refundedAmount)||0);
-    const refundedAmount=partial?Math.min(product.price,priorRefund+price):product.price;
+    const refundedAmount=partial?Math.min(amount,priorRefund+price):amount;
     const priorGrant=order.entitlementGranted===true||order.status==='paid';
-    const status=partial&&refundedAmount<product.price?'partially_refunded':priorGrant||order.paidAtMs?'refunded':'cancelled';
+    const status=partial&&refundedAmount<amount?'partially_refunded':priorGrant||order.paidAtMs?'refunded':'cancelled';
     if(!alreadyFull){
      let review=!!order.entitlementReviewRequired;
      if(priorGrant&&!order.entitlementRevokedAtMs&&userSnap.exists){const revoked=entitlement.revokePatch(user,orderId,order,now);tx.set(userRef,{...revoked.patch,...(revoked.needsReview?{entitlementReviewRequired:true}: {})},{merge:true});review=review||revoked.needsReview;}

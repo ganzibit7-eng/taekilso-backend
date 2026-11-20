@@ -4,7 +4,7 @@
 const admin = require('firebase-admin');
 const newyearAccess = require('../lib/newyear-access');
 const {assertMemberAllowed} = require('../lib/member-access');
-const {consumeCreditPatch,rollbackCreditPatch} = require('../lib/payment-entitlements');
+const {consumeCreditPatch,rollbackCreditPatch,ms,premiumQuestionUsage,isQuestionPlanOrder} = require('../lib/payment-entitlements');
 const {recordMilestone} = require('../lib/consultation-metrics');
 const consultationService = require('../lib/consultation-service');
 const aiPrivacy = require('../lib/consultation-privacy');
@@ -282,7 +282,7 @@ function usageError(code, message) {
 }
 
 // Claude를 호출하기 전에 사용량을 transaction으로 "예약"합니다.
-// 이렇게 해야 동시에 여러 요청을 보내도 무료 3회 / 프리미엄 하루 10회를 넘지 않습니다.
+// 무료, 일일 한도, 새 이용권의 전체 한도를 같은 트랜잭션에서 적용합니다.
 // AI 호출이 실패하거나 타임아웃되면 rollbackUsageReservation()에서 예약을 되돌립니다.
 async function reserveUsageAtomic(uid, isAdminUser = false) {
   const userRef = db.collection('users').doc(uid);
@@ -326,14 +326,21 @@ async function reserveUsageAtomic(uid, isAdminUser = false) {
       };
     }
 
-    const premiumNow = !!userData.premium && (userData.premiumUntil || 0) > Date.now();
+    const now = Date.now();
+    const premiumNow = userData.premium === true && ms(userData.premiumUntil) > now;
 
     if (premiumNow) {
       const dailySnap = await tx.get(dailyRef);
       const count = dailySnap.exists ? Number(dailySnap.data().count || 0) : 0;
-      if (count >= PREMIUM_DAILY_LIMIT) {
-        throw usageError('DAILY_LIMIT_REACHED', '오늘 상담 가능 횟수를 모두 사용하셨어요. 내일 다시 이용해주세요.');
+      const usage = await premiumQuestionUsage(db,tx,userData,uid,now);
+      const total = usage ? {premiumTotalLimit:usage.limit,premiumTotalUsed:usage.used} : {};
+      if (usage && usage.used >= usage.limit) {
+        throw Object.assign(usageError('PREMIUM_TOTAL_LIMIT_REACHED', '이 신년상담 이용권의 질문 30개를 모두 사용했어요. 신년 리포트와 정밀 택일은 계속 이용할 수 있어요.'), total, {dailyUsed:count});
       }
+      if (count >= PREMIUM_DAILY_LIMIT) {
+        throw Object.assign(usageError('DAILY_LIMIT_REACHED', '오늘 상담 가능 횟수를 모두 사용하셨어요. 내일 다시 이용해주세요.'), total, {dailyUsed:count});
+      }
+      if (usage) tx.update(usage.orderRef,{premiumQuestionsUsed:admin.firestore.FieldValue.increment(1)});
       tx.set(dailyRef, {
         count: admin.firestore.FieldValue.increment(1),
         uid,
@@ -342,6 +349,7 @@ async function reserveUsageAtomic(uid, isAdminUser = false) {
       }, { merge: true });
       return {
         kind: 'premium',
+        ...(usage ? {premiumOrderId:usage.orderId,premiumTotalLimit:usage.limit,premiumTotalUsed:usage.used+1} : {}),
         todayKey,
         isPremiumNow: true,
         freeUsed: null,
@@ -400,6 +408,13 @@ async function rollbackUsageReservation(uid, reservation) {
       const dailyRef = db.collection('aiDailyUsage').doc(`${uid}_${reservation.todayKey}`);
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(dailyRef);
+        if (reservation.premiumOrderId) {
+          const orderRef = db.collection('paymentOrders').doc(reservation.premiumOrderId);
+          const order = (await tx.get(orderRef)).data();
+          if (isQuestionPlanOrder(order,uid) && order.premiumQuestionsUsed > 0) {
+            tx.update(orderRef,{premiumQuestionsUsed:admin.firestore.FieldValue.increment(-1)});
+          }
+        }
         if (!snap.exists) return;
         const count = Math.max(0, Number(snap.data().count || 0) - 1);
         tx.set(dailyRef, {
@@ -675,12 +690,20 @@ module.exports = async (req, res) => {
     try {
       usageReservation = await reserveUsageAtomic(uid, isAdminUser);
     } catch (usageErr) {
-      if (usageErr && usageErr.code === 'DAILY_LIMIT_REACHED') {
+      if (['DAILY_LIMIT_REACHED','PREMIUM_TOTAL_LIMIT_REACHED'].includes(usageErr?.code)) {
         return res.status(403).json({
-          error: 'DAILY_LIMIT_REACHED',
+          error: usageErr.code,
           message: usageErr.message,
-          premiumDailyLimit: isAdminUser ? ADMIN_DAILY_LIMIT : PREMIUM_DAILY_LIMIT
+          premiumDailyLimit: isAdminUser ? ADMIN_DAILY_LIMIT : PREMIUM_DAILY_LIMIT,
+          premiumDailyUsed: usageErr.dailyUsed,
+          premiumTotalLimit: usageErr.premiumTotalLimit,
+          premiumTotalUsed: usageErr.premiumTotalUsed,
+          isAdmin: isAdminUser,
+          usageCharged:false
         });
+      }
+      if (usageErr?.code === 'PREMIUM_USAGE_UNAVAILABLE') {
+        return res.status(503).json({error:usageErr.code,message:'이용권의 남은 질문 수를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.',usageCharged:false});
       }
       if (usageErr && usageErr.code === 'FREE_LIMIT_REACHED') {
         if (!isAdminUser) await recordMilestone(db,uid,'freeLimitExhausted',req.body.analytics).catch(()=>{});
@@ -924,6 +947,8 @@ module.exports = async (req, res) => {
       premiumPrice: 8900,
       premiumDays: 30,
       premiumDailyUsed: usageReservation.dailyUsed == null ? null : usageReservation.dailyUsed,
+      premiumTotalLimit: usageReservation.premiumTotalLimit,
+      premiumTotalUsed: usageReservation.premiumTotalUsed,
       isAdmin: !!usageReservation.isAdmin,
 
       usingCredit: usageReservation.usingCredit,
