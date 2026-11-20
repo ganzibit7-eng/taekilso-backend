@@ -677,14 +677,17 @@ module.exports = async (req, res) => {
     const newyearRequested = newyearAccess.isNewyearRequest(message, history, req.body.consultationScope);
     const legacyReport=Object.hasOwn(req.body,'seohwaReportId');
     const featuredReport=Object.hasOwn(req.body,'featuredReportId');
+    const reportService=featuredReports.get(consultantId);
     let reportScope=null;
     if(legacyReport||featuredReport){
-      const service=featuredReports.get(consultantId);
-      if(!service||newyearRequested||legacyReport!==(consultantId==='seohwa')||(legacyReport&&featuredReport)){
+      if(!reportService||newyearRequested||legacyReport!==(consultantId==='seohwa')||(legacyReport&&featuredReport)){
         return res.status(400).json({error:'FEATURED_REPORT_SCOPE',message:'리포트에 포함된 상담은 해당 리포트의 상담사에게 사용할 수 있어요.',usageCharged:false});
       }
-      reportScope={service,id:legacyReport?req.body.seohwaReportId:req.body.featuredReportId,
+      reportScope={service:reportService,id:legacyReport?req.body.seohwaReportId:req.body.featuredReportId,
         chapter:legacyReport?req.body.seohwaChapter:req.body.featuredReportChapter};
+    }
+    if(reportService&&!reportScope){
+      return res.status(403).json({error:'FEATURED_REPORT_PURCHASE_REQUIRED',message:'이 상담사에게는 해당 리포트에 포함된 상담 3회를 사용할 수 있어요. 구매한 리포트에서 상담을 시작해 주세요.',usageCharged:false});
     }
     let newyearAllowed = false;
     if (newyearRequested) {
