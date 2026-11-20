@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {calculate,validate}=require('../lib/relationship-report');
+const {calculate,validate,present}=require('../lib/relationship-report');
 const {dayIndex}=require('../lib/consultation-calculation');
 
 test('relationship report uses the existing day calculation and different pairs get different grounded examples',()=>{
@@ -17,6 +17,25 @@ test('relationship report uses the existing day calculation and different pairs 
  assert.match(inverted.evidence[0].detail,/본인의 목에서 상대방의 화/);
  assert.equal(inverted.conversations[1].first,sample.conversations[1].second);
  assert.notDeepEqual(calculate({first:0,second:4}).conversations,sample.conversations);
+});
+test('the expanded report contains twelve grounded chapters and updates old copies on read',()=>{
+ const same=calculate({first:0,second:0});
+ const mixed=calculate({first:0,second:4});
+ const length=report=>[report.summary,...report.strengths.flatMap(Object.values),...report.friction.flatMap(Object.values),
+  ...report.conversations.flatMap(Object.values),report.nextStep,
+  ...report.chapters.flatMap(c=>[c.title,c.scene,c.reading,c.first,c.second,c.action]),...report.routine.flatMap(Object.values)].join('').length;
+ assert.equal(same.edition,2);
+ assert.equal(same.chapters.length,12);
+ assert.equal(new Set(same.chapters.map(c=>c.title)).size,12);
+ assert.equal(new Set(same.chapters.map(c=>c.action)).size,12);
+ assert.equal(same.routine.length,4);
+ assert(length(same)>=7100 && length(mixed)<=8000);
+ assert(same.chapters.every(c=>same.evidence[c.basis] && c.first && c.second));
+ assert.notEqual(same.chapters.find(c=>c.basis===0).reading,mixed.chapters.find(c=>c.basis===0).reading);
+ const {edition,chapters,routine,...old}=mixed;
+ assert.deepEqual(present(old),mixed);
+ assert(!Object.hasOwn(old,'chapters'));
+ assert.equal(present(mixed),mixed);
 });
 test('relationship report rejects raw or invalid day inputs and strips personal fields from its canonical request',()=>{
  for(const input of [null,{}, {first:-1,second:0},{first:0,second:60},{first:1,second:'2'}, {first:1.3,second:2}]) {
