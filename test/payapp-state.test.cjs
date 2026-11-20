@@ -4,7 +4,7 @@ function fixture(options={}){const rows=new Map([['users/member',{premium:false}
  function apply(old,value){if(value&&typeof value==='object'&&'increment'in value)return (Number(old)||0)+value.increment;if(value&&typeof value==='object'&&!Array.isArray(value)&&!(value instanceof Date)){const result={...old};for(const [k,v]of Object.entries(value))result[k]=apply(result[k],v);return result;}return value;}
  function put(key,value,merge=true){rows.set(key,apply(merge?rows.get(key):{},value));}
  const ref=key=>({id:key.split('/').at(-1),async get(){return {id:this.id,exists:rows.has(key),data:()=>rows.get(key)}},async set(v,o){put(key,v,o?.merge)},async update(v){put(key,v)},collection:name=>collection(key+'/'+name),key});
- const collection=col=>({doc:id=>ref(col+'/'+id),where(field,op,value){return {limit(){return this},orderBy(){return this},async get(){return {docs:[...rows].filter(([k,v])=>k.startsWith(col+'/')&&(op==='>'?v[field]>value:v[field]===value)).map(([k,v])=>({id:k.split('/').at(-1),data:()=>v}))}}}}});
+ const collection=col=>({doc:id=>ref(col+'/'+id),where(field,op,value){return {select(){return this},limit(){return this},orderBy(){return this},async get(){return {docs:[...rows].filter(([k,v])=>k.startsWith(col+'/')&&(op==='>'?v[field]>value:v[field]===value)).map(([k,v])=>({id:k.split('/').at(-1),data:()=>v}))}}}}});
  const db={collection,runTransaction(fn){const job=queue.then(()=>fn({get:r=>r.get(),set(r,v,o){put(r.key,v,o?.merge)},create(r,v){assert(!rows.has(r.key));put(r.key,v,false)},update(r,v){put(r.key,v)}}));queue=job.catch(()=>{});return job}};
  const admin={apps:[{}],firestore:()=>db};if(options.deleted)admin.auth=()=>({async getUser(){throw Object.assign(new Error('gone'),{code:'auth/user-not-found'})}});admin.firestore.FieldValue={increment:n=>({increment:n}),serverTimestamp:()=>Date.now()};
  const filename=path.resolve(__dirname,'../api/payapp-feedback.js'),realRequire=createRequire(filename),context={module:{exports:{}},require:n=>n==='firebase-admin'?admin:realRequire(n),process:{env:{PAYAPP_LINKVAL:'test-only'}},Buffer,console:{error(){},warn(){},log(){}}};vm.runInNewContext(fs.readFileSync(filename,'utf8'),context,{filename});
@@ -116,11 +116,35 @@ test('5,900-won relationship report stays paused for everyone and issues only to
  const {edition,chapters,routine,...legacy}=stored.report;
  f.rows.set(savedKey,{...stored,report:legacy});
  assert.equal((await relationship.run(f.db,'member',{operation:'open',id:purchase.id})).report.chapters.length,12);
- assert.equal((await relationship.run(f.db,'member',{operation:'list'})).reports[0].report.edition,2);
+ assert.equal((await relationship.run(f.db,'member',{operation:'list'})).reports[0].report.edition,3);
  assert.equal(f.rows.get(savedKey).report.edition,undefined);
+ const compact=await relationship.run(f.db,'member',{operation:'list',summaryOnly:true});
+ assert.deepEqual(compact.reports[0].days,stored.report.people.map(person=>person.day));
+ assert.equal(compact.reports[0].report,undefined);
  assert.equal(f.rows.get('stats/counters').revenue,14800);
  assert.equal((await f.notify(9,pay)).body,'SUCCESS');
  assert.equal((await relationship.run(f.db,'member',{operation:'list'})).reports.length,0);
  assert.equal(f.rows.get('users/member').premium,true);
  assert.equal(f.rows.get('stats/counters').revenue,8900);
+});
+test('a signed unpaid report notification resumes the same checkout and an outstanding transfer cannot be reopened',async()=>{
+ const relationship=require('../lib/relationship-report');
+ const f=fixture(), input={operation:'prepare',comparison:{first:2,second:5},checkout:true,allowResume:true};
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const order=await relationship.run(f.db,'member',input);
+ const pay={var1:order.orderId,price:5900,goodname:order.name,payurl:'http://payapp.kr/000000000000'};
+ await f.notify(1,pay);
+ const resume=await relationship.run(f.db,'member',input,Date.now()+45*60*1000);
+ assert.deepEqual(resume,{state:'resume',id:order.id,resumeUrl:'https://payapp.kr/000000000000'});
+ const open={operation:'open',id:order.id,allowResume:true};
+ assert.deepEqual(await relationship.run(f.db,'member',open),resume);
+ await assert.rejects(relationship.run(f.db,'other',open),{code:'REPORT_NOT_FOUND'});
+ f.rows.set('siteSettings/checkout',{enabled:false});
+ assert.deepEqual(await relationship.run(f.db,'member',open),{state:'pending'});
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ await f.notify(10,pay);
+ assert.equal((await relationship.run(f.db,'member',input)).waiting,'deposit');
+ await f.notify(4,pay);
+ assert.equal((await relationship.run(f.db,'member',open)).state,'ready');
+ assert.equal([...f.rows.values()].filter(x=>x.product===relationship.CONFIG.product).length,1);
 });
