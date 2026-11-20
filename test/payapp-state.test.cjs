@@ -20,3 +20,28 @@ test('partial refund uses original amount and transaction identity, then full re
 test('refunding one credit purchase preserves another purchase after consumption',async()=>{const f=fixture();f.rows.set('paymentOrders/TAK-TEST-ORDER',{uid:'member',product:'ai_question_pack_5',amount:1900,status:'pending'});await f.notify(4,{price:1900,goodname:'AI 질문권 5개'});const ent=require('../lib/payment-entitlements');let u=f.rows.get('users/member');u={...u,...ent.grantPatch(u,'OTHER','ai_question_pack_10',Date.now())};for(let i=0;i<3;i++)u={...u,...ent.consumeCreditPatch(u).patch};f.rows.set('users/member',u);await f.notify(9,{price:1900,goodname:'AI 질문권 5개'});assert.equal(f.rows.get('users/member').aiQuestionCredits,10);});
 test('payment completing after account deletion records review without recreating profile',async()=>{const f=fixture({deleted:true});f.rows.delete('users/member');await f.notify(4);assert.equal(f.rows.has('users/member'),false);assert.equal(f.rows.get('paymentOrders/TAK-TEST-ORDER').entitlementReviewRequired,true);assert.equal(f.rows.get('paymentOrders/TAK-TEST-ORDER').entitlementGranted,false);});
 test('optional PayApp signature rejects missing/expired hashes before writes and accepts a valid current hash',async()=>{const crypto=require('node:crypto'),f=fixture({env:{PAYAPP_REQUESTKEY:'synthetic-key'}}),before=f.rows.size;assert.equal((await f.notify(4)).body,'INVALID_SIGNATURE');assert.equal(f.rows.size,before);const stamp=new Date(Date.now()+9*3600000).toISOString().slice(0,19).replace(/\D/g,'');const hash=crypto.createHash('sha256').update('green5797'+stamp+'synthetic-key').digest('hex');assert.equal((await f.notify(4,{responsedate:stamp,hash})).body,'SUCCESS');});
+test('legacy and new 10-question orders grant and refund only at their recorded amounts',async()=>{
+ for(const amount of [2500,3200]){
+  const f=fixture();
+  f.rows.set('paymentOrders/TAK-TEST-ORDER',{uid:'member',product:'ai_question_pack_10',amount,status:'pending'});
+  const pack={goodname:'AI 질문권 10개'};
+  assert.equal((await f.notify(4,{...pack,price:amount===2500?3200:2500})).body,'INVALID_PRICE');
+  assert.equal((await f.notify(4,{...pack,price:amount})).body,'SUCCESS');
+  assert.equal(f.rows.get('users/member').aiQuestionCredits,10);
+  assert.equal(f.rows.get('stats/counters').revenue,amount);
+  assert.equal((await f.notify(9,{...pack,price:amount})).body,'SUCCESS');
+  assert.equal(f.rows.get('users/member').aiQuestionCredits,0);
+  assert.equal(f.rows.get('stats/counters').revenue,0);
+ }
+});
+test('payment preserves legacy time in front of a capped new pass, including after its refund',async()=>{
+ const f=fixture();
+ const previous=Date.now()+86400000;
+ f.rows.set('users/member',{premium:true,premiumUntil:previous});
+ f.rows.get('paymentOrders/TAK-TEST-ORDER').planVersion=2;
+ assert.equal((await f.notify(4)).body,'SUCCESS');
+ const member=f.rows.get('users/member');
+ assert.deepEqual(Array.from(member.premiumLots,lot=>lot.planVersion),[undefined,2]);
+ assert.equal((await f.notify(9)).body,'SUCCESS');
+ assert.equal(f.rows.get('users/member').premiumUntil,previous);
+});
