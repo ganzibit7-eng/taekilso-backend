@@ -47,6 +47,77 @@ test('payment preserves legacy time in front of a capped new pass, including aft
  assert.equal(f.rows.get('users/member').premiumUntil,previous);
 });
 const dateReport=require('../lib/date-report');
+const seohwa=require('../lib/seohwa-report');
+const seohwaTransfer=require('../lib/ai-transfer-consent');
+const seohwaComparison={profile:{y:1990,m:1,d:1,calType:'solar',hourValue:'unknown',gender:'female'},choice:1};
+const seohwaCheckout={operation:'prepare',comparison:seohwaComparison,checkout:true};
+
+test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 연결된다',async()=>{
+ const f=fixture(),user='users/member';
+ f.rows.set(user,{premium:false,aiFreeUsed:2,aiQuestionCredits:7});
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ await assert.rejects(()=>seohwa.run(f.db,'member',seohwaCheckout),{code:'AI_TRANSFER_CONSENT_REQUIRED'});
+ await seohwaTransfer.manage(f.db,'member',{operation:'grant',noticeVersion:seohwaTransfer.NOTICE_VERSION,expectedRevision:0});
+ f.rows.set('siteSettings/checkout',{enabled:false});
+ assert.equal((await seohwa.run(f.db,'member',seohwaCheckout)).state,'paused');
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const created=await seohwa.run(f.db,'member',seohwaCheckout);
+ const {id,orderId}=created;
+ assert.equal(created.price,5900);
+ assert.equal((await seohwa.run(f.db,'member',seohwaCheckout)).state,'pending');
+ let providerCalls=0,finish,providerStart;
+ const started=new Promise(resolve=>{providerStart=resolve;});
+ const waiting=new Promise(resolve=>{finish=resolve;});
+ const settings={env:{AI_PRIMARY_PROVIDER:'openai',OPENAI_MODEL:'gpt-6.2-sol',OPENAI_API_KEY:'synthetic'},fetchImpl:async(url,options)=>{
+  providerCalls++; const request=JSON.parse(options.body),input=JSON.parse(request.input[0].content);
+  assert.equal(new URL(url).origin,'https://api.openai.com');
+  assert.equal(request.store,false);
+  assert.equal(JSON.stringify(request).includes('1990'),false);
+  assert.equal(Object.hasOwn(input,'profile'),false);
+  providerStart(); await waiting;
+  const chapters=input.chapterPlan.map(({requiredBasis,title},index)=>({highlight:title+'을 먼저 가만히 살펴봐요.',basisId:requiredBasis||'s1',
+   paragraphs:[0,1,2,3].map(part=>title+'의 '+index+'번 장면과 '+part+'번째 이야기예요. '+'마음을 전한 뒤 실제 이어진 일을 생각하며 어떤 말이 오래 남았는지 돌아봐요. '.repeat(4))}));
+  return {ok:true,json:async()=>({status:'completed',output:[{type:'function_call',name:'write_seohwa_report',arguments:JSON.stringify({chapters})}]})};
+ }};
+ await assert.rejects(()=>seohwa.generate(f.db,'member',id,settings),{code:'SEOHWA_REPORT_REQUIRED'});
+ await assert.rejects(()=>seohwa.generate(f.db,'other',id,settings),{code:'SEOHWA_REPORT_REQUIRED'});
+ assert.equal(providerCalls,0);
+ const callback={var1:orderId,goodname:created.name,price:created.price};
+ assert.equal((await f.notify(4,{...callback,price:1900})).body,'INVALID_PRICE');
+ assert.equal((await f.notify(4,callback)).body,'SUCCESS');
+ assert.equal((await f.notify(4,callback)).body,'SUCCESS');
+ assert.equal((await seohwa.run(f.db,'member',{operation:'open',id})).state,'paid');
+ const result=seohwa.generate(f.db,'member',id,settings);
+ await started;
+ assert.equal((await seohwa.generate(f.db,'member',id,settings)).state,'generating');
+ finish();
+ const full=await result;
+ assert.equal(providerCalls,1);
+ assert.equal(full.state,'ready');
+ assert.equal(full.questionsLeft,3);
+ assert.equal(full.report.body.length,5);
+ const seed=seohwa.calculate(seohwa.validate(seohwaComparison));
+ for(const snippet of seed.excerpts){
+  assert.equal(full.report.body[snippet.index].paragraphs[0],snippet.text);
+  assert.equal(full.report.body[snippet.index].basis.id,snippet.basisId);
+ }
+ assert.equal((await seohwa.run(f.db,'member',{operation:'list'})).reports[0].choice,1);
+ const reserve=()=>f.db.runTransaction(tx=>seohwa.reserve(f.db,tx,'member',id,0,f.rows.get(user)));
+ const one=await reserve();
+ assert.equal(one.seohwaQuestionsLeft,2);
+ assert.equal(one.context.point,full.report.body[0].highlight);
+ await seohwa.rollback(f.db,'member',one);
+ const results=await Promise.all([reserve(),reserve(),reserve()]);
+ assert.deepEqual(results.map(row=>row.seohwaQuestionsLeft),[2,1,0]);
+ await assert.rejects(reserve,{code:'SEOHWA_QUESTIONS_USED'});
+ await f.notify(9,callback);
+ await seohwa.rollback(f.db,'member',results[2]);
+ await assert.rejects(reserve,{code:'SEOHWA_REPORT_REQUIRED'});
+ assert.equal((await seohwa.run(f.db,'member',{operation:'open',id})).state,'refunded');
+ assert.equal(f.rows.get(user).aiFreeUsed,2);
+ assert.equal(f.rows.get(user).aiQuestionCredits,7);
+ assert.equal(f.rows.get('stats/counters').revenue,0);
+});
 const dateComparison={event:'결혼식',days:['2027-05-15','2027-05-16','2027-05-23'],mine:'화',partner:'목'};
 const prepareDate={operation:'prepare',comparison:dateComparison,checkout:true};
 test('comparison stays free to preview, single-order purchases are blocked while paused, and existing premium can save',async()=>{

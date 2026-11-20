@@ -2,7 +2,8 @@
 const admin=require('firebase-admin'),crypto=require('node:crypto');
 const {URL}=require('node:url');
 const entitlement=require('../lib/payment-entitlements');
-const reports=Object.fromEntries([require('../lib/date-report').CONFIG,require('../lib/relationship-report').CONFIG]
+const seohwa=require('../lib/seohwa-report').CONFIG;
+const reports=Object.fromEntries([require('../lib/date-report').CONFIG,require('../lib/relationship-report').CONFIG,seohwa]
  .map(config=>[config.product,config]));
 let db=null,initError=null;
 try{if(!admin.apps.length)admin.initializeApp({credential:admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))});db=admin.firestore();}catch(e){initError=e;}
@@ -76,7 +77,7 @@ module.exports=async(req,res)=>{
     if(typeof admin.auth==='function'){try{await admin.auth().getUser(order.uid);}catch(e){if(e.code==='auth/user-not-found')accountExists=false;else throw e;}}
     let granted=accountExists;
     if(reportOrder){
-     granted=accountExists&&userSnap.exists&&!!report&&!report.ready;
+     granted=accountExists&&userSnap.exists&&!!report&&!report.ready&&(reportOrder!==seohwa||report.orderId===orderId);
      if(granted)tx.update(reportRef,{ready:true,readyAtMs:now,state:'ready',paidOrderId:orderId});
     }else if(accountExists){
      const patch=entitlement.grantPatch(user,orderId,order.product,now,order.planVersion);
@@ -94,6 +95,7 @@ module.exports=async(req,res)=>{
      if(reportOrder){
       if(report?.paidOrderId===orderId||(!report?.ready&&report?.orderId===orderId)) {
        tx.update(reportRef,{ready:false,readyAtMs:0,state:status,paidOrderId:null});
+       if(reportOrder===seohwa && report.questionsUsed>0) review=true;
       }
      }else if(priorGrant&&!order.entitlementRevokedAtMs&&userSnap.exists){const revoked=entitlement.revokePatch(user,orderId,order,now);tx.set(userRef,{...revoked.patch,...(revoked.needsReview?{entitlementReviewRequired:true}: {})},{merge:true});review=review||revoked.needsReview;}
      tx.update(orderRef,{status,lastPayState:state,lastMulNo:mulNo,mul_no:order.mul_no||originalNo,refundedAmount,entitlementRevokedAtMs:order.entitlementRevokedAtMs||now,entitlementReviewRequired:review,cancelledAtMs:now,updatedAt:admin.firestore.FieldValue.serverTimestamp()});
