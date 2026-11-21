@@ -190,12 +190,15 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
    assert(new Set(input.chapterPlan.map(chapter=>chapter.requiredBasis)).size>2);
    assert(input.evidence.every(item=>item.pillar&&!item.natal));
    if(consultant==='dogyeom'){
+    assert(input.evidence.every(item=>item.term&&item.position&&!item.meaning));
+    assert(input.wealth_judgment.annual.every(year=>year.basis&&!year.talk&&!year.caution));
+    assert(input.wealth_judgment.outlook.years.every(year=>year.basis&&!year.talk));
     assert.deepEqual(input.wealth_judgment.timing.map(item=>item.kind),['income','margin','risk']);
-    assert(input.wealth_judgment.timing.every(item=>item.basis&&item.talk&&!item.from));
+    assert(input.wealth_judgment.timing.every(item=>item.basis&&item.ganZhi&&!item.from));
     assert(input.chapterPlan.every(chapter=>chapter.wealthFocus));
     assert.equal(input.wealth_judgment.opportunities.length,3);
-    assert(input.wealth_judgment.opportunities.every(item=>item.basis&&item.description&&Number.isInteger(item.month)));
-    assert(input.wealth_judgment.expenses.every(item=>item.basis&&item.caution&&!item.score));
+    assert(input.wealth_judgment.opportunities.every(item=>item.basis&&item.ganZhi&&Number.isInteger(item.month)));
+    assert(input.wealth_judgment.expenses.every(item=>item.basis&&Number.isInteger(item.index)&&!item.caution));
    }else assert.equal(input.wealth_judgment,undefined);
    const chapters=input.chapterPlan.map(({requiredBasis,title},index)=>({highlight:title+'부터 차분히 살펴봐요.',basisId:requiredBasis||'s1',
     paragraphs:[0,1,2,3].map(p=>title+'에 관해 '+index+'번 장면의 '+p+'번째 이야기예요. '+'먼저 확인할 조건이 달라지면 해온 일에서 어떤 부분을 바꿔볼지 차분히 돌아봐요. '.repeat(4))}));
