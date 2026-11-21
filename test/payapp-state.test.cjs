@@ -78,6 +78,7 @@ test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 �
   assert.equal(request.store,false);
   assert.equal(JSON.stringify(request).includes('1990'),false);
   assert.equal(Object.hasOwn(input,'profile'),false);
+  assert(input.chapterPlan.every(chapter=>input.evidence.some(item=>item.id===chapter.requiredBasis)));
   providerStart(); await waiting;
   const chapters=input.chapterPlan.map(({requiredBasis,title},index)=>({highlight:title+'을 먼저 가만히 살펴봐요.',basisId:requiredBasis||'s1',
    paragraphs:[0,1,2,3].map(part=>title+'의 '+index+'번 장면과 '+part+'번째 이야기예요. '+'마음을 전한 뒤 실제 이어진 일을 생각하며 어떤 말이 오래 남았는지 돌아봐요. '.repeat(4))}));
@@ -186,6 +187,8 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
    const req=JSON.parse(settings.body);
    assert(!JSON.stringify(req).includes('1990'));
    const input=JSON.parse(req.input[0].content);
+   assert(new Set(input.chapterPlan.map(chapter=>chapter.requiredBasis)).size>2);
+   assert(input.evidence.every(item=>item.pillar&&!item.natal));
    if(consultant==='dogyeom'){
     assert.deepEqual(input.wealth_judgment.timing.map(item=>item.kind),['income','margin','risk']);
     assert(input.wealth_judgment.timing.every(item=>item.basis&&item.talk&&!item.from));
@@ -236,6 +239,19 @@ test('도겸은 공통 원국에 따라 수입 통로와 절기 구간을 따로
    assert(periods.some(item=>item.untilExclusive===window.untilExclusive&&item.monthGanZhi===window.ganZhi));
    assert(window.untilExclusive>window.from);
   }
+ }
+});
+
+test('같은 고민을 고르더라도 네 리포트의 첫 장 핵심은 출생 정보에서 읽은 근거에 맞춰 바뀐다',()=>{
+ const a={...seohwaComparison.profile,hourValue:'14'};
+ const b={...a,y:1994,m:6,d:15};
+ for(const service of seohwa.reports.values()){
+  const first=service.calculate({profile:a,choice:1});
+  const second=service.calculate({profile:b,choice:1});
+  assert.notEqual(first.first.highlight,second.first.highlight);
+  assert.notEqual(first.first.basis[0].family,second.first.basis[0].family);
+  assert.equal(first.first.title,second.first.title);
+  assert(first.context.supportingReadings.length>0);
  }
 });
 
