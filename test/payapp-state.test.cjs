@@ -193,6 +193,9 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
     assert.deepEqual(input.wealth_judgment.timing.map(item=>item.kind),['income','margin','risk']);
     assert(input.wealth_judgment.timing.every(item=>item.basis&&item.talk&&!item.from));
     assert(input.chapterPlan.every(chapter=>chapter.wealthFocus));
+    assert.equal(input.wealth_judgment.opportunities.length,3);
+    assert(input.wealth_judgment.opportunities.every(item=>item.basis&&item.description&&!item.month));
+    assert(input.wealth_judgment.expenses.every(item=>item.basis&&item.caution&&!item.score));
    }else assert.equal(input.wealth_judgment,undefined);
    const chapters=input.chapterPlan.map(({requiredBasis,title},index)=>({highlight:title+'부터 차분히 살펴봐요.',basisId:requiredBasis||'s1',
     paragraphs:[0,1,2,3].map(p=>title+'에 관해 '+index+'번 장면의 '+p+'번째 이야기예요. '+'먼저 확인할 조건이 달라지면 해온 일에서 어떤 부분을 바꿔볼지 차분히 돌아봐요. '.repeat(4))}));
@@ -202,7 +205,14 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
   assert.equal(ready.questionsLeft,3);
   assert.equal(ready.report.body.length,5);
   if(consultant==='dogyeom'){
-   assert.equal(ready.report.calendar.rows.length,12);
+   const calendar=ready.report.calendar;
+   assert.deepEqual(calendar.rows.map(item=>item.month),Array.from({length:12},(_,i)=>i+1));
+   assert(calendar.rows.every(item=>item.rank>=1&&item.rank<=12&&item.score>=0&&item.score<=100&&item.roles.business));
+   assert.equal(new Set(calendar.ranking.opportunity).size,3);
+   assert.equal(calendar.outlook.years.length,10);
+   assert.deepEqual(calendar.outlook.horizons.map(item=>item.size),[3,5,10]);
+   const different=service.calculate(service.validate({choice:1,profile:{y:1994,m:6,d:15,calType:'solar',hourValue:'14',gender:'female'}})).calendar;
+   assert.notDeepEqual(different.ranking.opportunity,calendar.ranking.opportunity);
    assert(!ready.report.calendar.pillars.hour);
    assert(ready.report.calendar.focuses.every(item=>item.reason&&item.action&&item.check));
    const saved=f.rows.get('users/member/dogyeomReports/'+id);
