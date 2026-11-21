@@ -81,7 +81,7 @@ test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 �
   assert(input.chapterPlan.every(chapter=>input.evidence.some(item=>item.id===chapter.requiredBasis)));
   providerStart(); await waiting;
   const chapters=input.chapterPlan.map(({requiredBasis,title},index)=>({highlight:title+'을 먼저 가만히 살펴봐요.',basisId:requiredBasis||'s1',
-   paragraphs:[0,1,2,3].map(part=>title+'의 '+index+'번 장면과 '+part+'번째 이야기예요. '+'마음을 전한 뒤 실제 이어진 일을 생각하며 어떤 말이 오래 남았는지 돌아봐요. '.repeat(4))}));
+   paragraphs:[0,1,2,3].map(part=>title+(input.timing?' '+input.evidence.find(item=>item.id===requiredBasis).term:'')+'의 '+index+'번 장면과 '+part+'번째 이야기예요. '+'마음을 전한 뒤 실제 이어진 일을 생각하며 어떤 말이 오래 남았는지 돌아봐요. '.repeat(4))}));
   return {ok:true,json:async()=>({status:'completed',output:[{type:'function_call',name:'write_seohwa_report',arguments:JSON.stringify({chapters})}]})};
  }};
  await assert.rejects(()=>seohwa.generate(f.db,'member',id,settings),{code:'SEOHWA_REPORT_REQUIRED'});
@@ -202,7 +202,7 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
     assert(input.wealth_judgment.expenses.every(item=>item.basis&&Number.isInteger(item.index)&&!item.caution));
    }else assert.equal(input.wealth_judgment,undefined);
    const chapters=input.chapterPlan.map(({requiredBasis,title},index)=>({highlight:title+'부터 차분히 살펴봐요.',basisId:requiredBasis||'s1',
-    paragraphs:[0,1,2,3].map(p=>title+'에 관해 '+index+'번 장면의 '+p+'번째 이야기예요. '+'먼저 확인할 조건이 달라지면 해온 일에서 어떤 부분을 바꿔볼지 차분히 돌아봐요. '.repeat(4))}));
+    paragraphs:[0,1,2,3].map(p=>title+(input.timing?' '+input.evidence.find(item=>item.id===requiredBasis).term:'')+'에 관해 '+index+'번 장면의 '+p+'번째 이야기예요. '+'먼저 확인할 조건이 달라지면 해온 일에서 어떤 부분을 바꿔볼지 차분히 돌아봐요. '.repeat(4))}));
    return {ok:true,json:async()=>({status:'completed',output:[{type:'function_call',name:'write_featured_report',arguments:JSON.stringify({chapters})}]})};
   }});
   assert.equal(requests,1);
