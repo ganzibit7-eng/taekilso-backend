@@ -52,3 +52,26 @@ for(const [y,m,d,hourValue] of dates)test('wealth evidence and calendar '+[y,m,d
     assert.equal(h.expense,range.toSorted((a,b)=>b.expenseScore-a.expenseScore)[0].year);
   }
 });
+const {between,toPeriod}=require('../lib/wealth-interactions');
+test('관계 표기와 오미합을 원국 위치별로 구분한다',()=>{
+  assert.deepEqual(toPeriod({day:'甲午'},'세운','丁未'),['일지 午·세운지 未 육합']);
+  assert.deepEqual(between('월','甲子','대운','己午'),['월간 甲·대운간 己 천간합','월지 子·대운지 午 충']);
+  assert.deepEqual(between('일','丙辰','월운','庚辰'),['일지 辰·월운지 辰 형']);
+  assert(!between('일','丙寅','월운','庚寅').some(x=>x.endsWith('형')));
+});
+test('10개 원국 무료 첫 장과 대운·세운 교차 확인',()=>{
+ const texts=new Set();
+ for(const [y,m,d,hourValue] of dates){
+   const {first,calendar:c}=service.calculate({profile:{y,m,d,hourValue,gender:'female',calType:'solar'},choice:1});
+   assert(first.sections.length>=3);
+   texts.add(first.sections.map(x=>x.text).join(' '));
+   for(const row of c.outlook.years){
+     const active=c.daewoon?.cycles.filter(v=>v.startYear<=row.year&&v.endYear>=row.year)||[];
+     assert(active.length<=1);assert.equal(row.cycle?.ganZhi,active[0]?.ganZhi);
+     assert.deepEqual(row.relations,toPeriod(c.pillars,'세운',row.ganZhi));
+   }
+   for(const row of c.rows)assert.deepEqual(row.relations,toPeriod(c.pillars,'월운',row.ganZhi));
+   if(hourValue==='unknown')assert(first.sections.some(s=>s.text.includes('시주는 제외')));
+ }
+ assert.equal(texts.size,dates.length);
+});
