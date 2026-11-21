@@ -194,7 +194,7 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
     assert(input.wealth_judgment.timing.every(item=>item.basis&&item.talk&&!item.from));
     assert(input.chapterPlan.every(chapter=>chapter.wealthFocus));
     assert.equal(input.wealth_judgment.opportunities.length,3);
-    assert(input.wealth_judgment.opportunities.every(item=>item.basis&&item.description&&!item.month));
+    assert(input.wealth_judgment.opportunities.every(item=>item.basis&&item.description&&Number.isInteger(item.month)));
     assert(input.wealth_judgment.expenses.every(item=>item.basis&&item.caution&&!item.score));
    }else assert.equal(input.wealth_judgment,undefined);
    const chapters=input.chapterPlan.map(({requiredBasis,title},index)=>({highlight:title+'부터 차분히 살펴봐요.',basisId:requiredBasis||'s1',
