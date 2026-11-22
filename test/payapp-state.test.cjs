@@ -50,7 +50,7 @@ const dateReport=require('../lib/date-report');
 const seohwa=require('../lib/seohwa-report');
 const seohwaTransfer=require('../lib/ai-transfer-consent');
 const seohwaComparison={profile:{y:1990,m:1,d:1,calType:'solar',hourValue:'unknown',gender:'female'},choice:1};
-const seohwaCheckout={operation:'prepare',comparison:seohwaComparison,checkout:true};
+const seohwaCheckout={operation:'prepare',comparison:seohwaComparison,checkout:true,expectedPrice:5900};
 
 test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 연결된다',async()=>{
  const f=fixture(),user='users/member';
@@ -172,7 +172,7 @@ test('각 대표 리포트의 승인과 후속 상담은 본인 주문과 담당
   const created=await service.run(f.db,'member',seohwaCheckout);
   const {id,orderId}=created;
   const status={operation:'checkout-status',orderId};
-  assert.equal(created.price,consultant==='dogyeom'?8900:5900);
+  assert.equal(created.price,5900);
   const event={var1:orderId,price:created.price,goodname:created.name};
   const wrong=seohwa.reports.get(consultant==='dogyeom'?'mujin':'dogyeom');
   await assert.rejects(wrong.run(f.db,'member',status),{code:'REPORT_ORDER_NOT_FOUND'});
@@ -391,19 +391,28 @@ test('renamed new year pass keeps the previous PayApp name valid for refunds',as
   assert.equal(f.rows.get('users/member').premium,false);
 });
 
-test('도겸 이전 가격 주문은 원래 금액으로 승인하고 환불한다',async()=>{
+test('도겸 이전 화면은 신규 주문을 만들지 않고 기존 주문은 표시된 금액으로 승인하고 환불한다',async()=>{
  const f=fixture(),service=seohwa.reports.get('dogyeom');
  await seohwaTransfer.manage(f.db,'member',{operation:'grant',noticeVersion:seohwaTransfer.NOTICE_VERSION,expectedRevision:0});
  f.rows.set('siteSettings/checkout',{enabled:true});
+ const orderCount=()=>[...f.rows.values()].filter(row=>row.product===service.CONFIG.product).length;
+ for (const expectedPrice of [undefined,8900]) {
+  await assert.rejects(service.run(f.db,'member',{...seohwaCheckout,expectedPrice}),{code:'REPORT_PRICE_CHANGED'});
+ }
+ assert.equal(orderCount(),0);
  const created=await service.run(f.db,'member',seohwaCheckout);
- assert.equal(created.price,8900);
+ assert.equal(created.price,5900);
  const order=f.rows.get('paymentOrders/'+created.orderId);
- const event={var1:created.orderId,price:5900,goodname:created.name};
+ const event={var1:created.orderId,price:8900,goodname:created.name};
  assert.notEqual((await f.notify(4,event)).body,'SUCCESS');
- order.amount=5900;
+ order.amount=8900;
  f.rows.set('paymentOrders/'+created.orderId,order);
  const status={operation:'checkout-status',orderId:created.orderId};
  assert.equal((await service.run(f.db,'member',status)).state,'pending');
+ assert.equal((await f.notify(1,{...event,payurl:'https://payapp.kr/000000000000'})).body,'SUCCESS');
+ assert.deepEqual(await service.run(f.db,'member',{...seohwaCheckout,allowResume:true}),{
+  state:'resume',id:created.id,resumeUrl:'https://payapp.kr/000000000000',price:8900
+ });
  assert.equal((await f.notify(4,event)).body,'SUCCESS');
  assert.equal((await service.run(f.db,'member',status)).state,'paid');
  assert.equal((await f.notify(9,event)).body,'SUCCESS');
