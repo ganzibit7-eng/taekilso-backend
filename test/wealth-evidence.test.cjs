@@ -13,21 +13,40 @@ function relation(day,other){
   return terms[(Math.floor(o/2)-Math.floor(d/2)+5)%5][(d+o)%2];
 }
 const dates=[[1990,1,1,'14'],[1994,6,15,'14'],[1985,2,4,'unknown'],[2000,8,17,'8'],[1981,11,12,'unknown'],[1978,4,8,'18'],[1999,12,23,'2'],[1992,3,20,'unknown'],[1988,5,5,'6'],[2003,9,30,'20'],[1972,5,9,'5'],[2001,2,4,'unknown'],[1996,7,17,'11'],[1984,10,28,'20'],[1970,12,7,'unknown']];
-test('asset readings vary by verified natal clues and reuse the calendar risk window',()=>{
- const priorities=new Set(),cautions=new Set();
+test('asset readings select two options and two cautions from verified natal and monthly clues',()=>{
+ const priorities=new Set(),cautions=new Set(),windows=new Set();
  for(const [y,m,d,hourValue] of dates){
    const {calendar}=service.calculate({profile:{y,m,d,hourValue,gender:'female',calType:'solar'},choice:1});
    const guide=wealthAssetGuide(calendar);
    assert.equal(guide.basis,calendar.judgment.route.basis);
-   assert.deepEqual(guide.assets.map(asset=>asset.label),['주식','부동산','가상자산']);
-   const risk=calendar.judgment.timing.find(item=>item.kind==='risk');
-   assert.equal(guide.risk?.title,risk?.title);
-   assert.equal(guide.risk?.basis,risk?.basis);
-   priorities.add(guide.priority);
-   cautions.add(guide.assets[2].reading);
+   assert.deepEqual(guide.assets.map(asset=>asset.label),['예금·적금','채권','분산형 ETF','개별주식','부동산','가상자산']);
+   assert.deepEqual(wealthAssetGuide({...calendar,natal:undefined}),guide);
+   for(const cards of [guide.consider,guide.avoid]){
+     assert.equal(new Set(cards.map(card=>card.label)).size,2);
+     for(const card of cards){
+       const row=calendar.rows.find(row=>row.month===card.timing.month);
+       const segment=row.segments.find(segment=>segment.monthGanZhi===row.ganZhi);
+       assert.equal(card.timing.from,segment.from);
+       assert.equal(card.timing.untilExclusive,segment.untilExclusive);
+       assert.ok(card.timing.fact.startsWith(row.ganZhi+' 월운'));
+       const [top,hidden]=row.basis.split(' · ')[0].split('·');
+       assert.match(card.timing.fact,new RegExp('천간 '+top+'|지지 주기운 '+hidden));
+       if(card.natalMeaning){
+         const [position,clue]=card.natalFact.split(' · ');
+         const natal=calendar.natal.find(factor=>factor.position===position);
+         assert.ok(natal);
+         assert.ok(['겉 글자 '+natal.visible,'지지 주기운 '+natal.hidden[0]].includes(clue));
+       }
+       if(hourValue==='unknown')assert.doesNotMatch(card.natalFact,/시주/);
+     }
+   }
+   priorities.add(guide.consider.map(card=>card.label).join(','));
+   cautions.add(guide.avoid.map(card=>card.label).join(','));
+   windows.add(guide.consider.map(card=>card.timing.month).join(','));
  }
  assert.ok(priorities.size>=3);
  assert.ok(cautions.size>=3);
+ assert.ok(windows.size>=3);
  assert.equal(wealthAssetGuide({}),null);
 });
 for(const [y,m,d,hourValue] of dates)test('wealth evidence and calendar '+[y,m,d].join('-'),()=>{
