@@ -5,6 +5,7 @@ const {reports}=require('../lib/seohwa-report');
 const {flow}=require('../lib/newyear-calculation');
 const {LunarUtil}=require('lunar-javascript');
 const service=reports.get('dogyeom');
+const wealthAssetGuide=require('../lib/wealth-asset-guide');
 const stems='甲乙丙丁戊己庚辛壬癸';
 const terms=[['비견','겁재'],['식신','상관'],['편재','정재'],['편관','정관'],['편인','정인']];
 function relation(day,other){
@@ -12,6 +13,23 @@ function relation(day,other){
   return terms[(Math.floor(o/2)-Math.floor(d/2)+5)%5][(d+o)%2];
 }
 const dates=[[1990,1,1,'14'],[1994,6,15,'14'],[1985,2,4,'unknown'],[2000,8,17,'8'],[1981,11,12,'unknown'],[1978,4,8,'18'],[1999,12,23,'2'],[1992,3,20,'unknown'],[1988,5,5,'6'],[2003,9,30,'20'],[1972,5,9,'5'],[2001,2,4,'unknown'],[1996,7,17,'11'],[1984,10,28,'20'],[1970,12,7,'unknown']];
+test('asset readings vary by verified natal clues and reuse the calendar risk window',()=>{
+ const priorities=new Set(),cautions=new Set();
+ for(const [y,m,d,hourValue] of dates){
+   const {calendar}=service.calculate({profile:{y,m,d,hourValue,gender:'female',calType:'solar'},choice:1});
+   const guide=wealthAssetGuide(calendar);
+   assert.equal(guide.basis,calendar.judgment.route.basis);
+   assert.deepEqual(guide.assets.map(asset=>asset.label),['주식','부동산','가상자산']);
+   const risk=calendar.judgment.timing.find(item=>item.kind==='risk');
+   assert.equal(guide.risk?.title,risk?.title);
+   assert.equal(guide.risk?.basis,risk?.basis);
+   priorities.add(guide.priority);
+   cautions.add(guide.assets[2].reading);
+ }
+ assert.ok(priorities.size>=3);
+ assert.ok(cautions.size>=3);
+ assert.equal(wealthAssetGuide({}),null);
+});
 for(const [y,m,d,hourValue] of dates)test('wealth evidence and calendar '+[y,m,d].join('-'),()=>{
   const input={profile:{y,m,d,hourValue,gender:'female',calType:'solar'},choice:1};
   const c=service.calculate(input).calendar, day=c.pillars.day[0], limit=x=>Math.min(100,Math.max(0,x));
