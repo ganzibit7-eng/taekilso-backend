@@ -34,6 +34,18 @@ test('real paid order with an earlier request/waiting notification unlocks witho
 function withChecks(options){const supplied=JSON.parse(JSON.parse(options.body).messages[0].content);return {...structuredClone(report),source_checks:structuredClone(supplied.source_checks_expected)};}
 function serviceFixture(user=premium,provider){const f=memory({'users/member':{aiTransferConsent:activeConsent,...user},'paymentOrders/paid':order});let calls=0;const handler=createService({db:f.db,authenticate:async()=>({uid:'member',email:'member@example.com'}),isAdminEmail:()=>false,apiKey:'test',model:'test',fetchImpl:async(...args)=>{calls++;if(provider)return provider(...args);return {ok:true,json:async()=>({stop_reason:'tool_use',content:[{type:'tool_use',name:'write_newyear_report',input:withChecks(args[1])}]})}}});return {...f,handler,calls:()=>calls};}
 test('free report generation is refused before provider or report writes',async()=>{const f=serviceFixture({premium:false,aiQuestionCredits:99}),r=res();await f.handler({body:{operation:'generate',profile,premium:true}},r);assert.equal(r.code,403);assert.equal(r.body.usageCharged,false);assert.equal(f.calls(),0);assert.equal(f.events.length,0);});
+test('the verified Google administrator can access the annual report with checkout closed',async()=>{
+ const {ADMIN_EMAIL}=require('../lib/admin-access'),f=memory({'users/member':{premium:false}});
+ f.rows.set('newyearReports/'+reportId('member'),{status:'ready',report,adminGrant:true,
+  profile:calculate(profile).profile,calculation:calculate(profile)});
+ for(const [email_verified,signInProvider,access] of [[true,'google.com',true],[false,'google.com',false],[true,'custom',false]]){
+  const handle=createService({db:f.db,authenticate:async()=>({uid:'member',email:ADMIN_EMAIL,email_verified,signInProvider})});
+  const answer=res();await handle({body:{operation:'status'}},answer);
+  assert.equal(answer.body.access,access);
+  assert.equal(Boolean(answer.body.report),access);
+ }
+ assert.equal(f.events.length,0);
+});
 test('standalone annual orders unlock the annual report only and a refunded order hides the report',async()=>{
  const annual=require('../lib/newyear-purchase'),f=serviceFixture({premium:false,aiQuestionCredits:5}),orderId='TAK-NEWYEAR-TEST';
  const marker='users/member/'+annual.CONFIG.collection+'/'+annual.id;
@@ -275,7 +287,7 @@ test('unverified administrator email never grants chat quota or annual pass',asy
 });
 
 test('verified administrator retains annual access without changing ordinary paid access',async()=>{
- const f=chatFixture({premium:false},undefined,{uid:'member',email:'green092432@gmail.com',email_verified:true}),r=res();
+ const f=chatFixture({premium:false},undefined,{uid:'member',email:'green092432@gmail.com',email_verified:true,firebase:{sign_in_provider:'google.com'}}),r=res();
  await f.handler({method:'POST',headers:{authorization:'Bearer test'},body:{action:'newyear-report',operation:'status'}},r);
  assert.equal(r.code,200);assert.equal(r.body.access,true);assert.equal(f.calls(),0);
 });
