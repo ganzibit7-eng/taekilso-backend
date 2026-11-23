@@ -2,6 +2,7 @@
 const admin=require('firebase-admin'),crypto=require('node:crypto');
 const {URL}=require('node:url');
 const entitlement=require('../lib/payment-entitlements');
+const retention=require('../lib/report-retention');
 const storyReports=[...require('../lib/seohwa-report').reports.values()].map(service=>service.CONFIG);
 const reports=Object.fromEntries([require('../lib/date-report').CONFIG,require('../lib/relationship-report').CONFIG,require('../lib/newyear-purchase').CONFIG,...storyReports]
  .map(config=>[config.product,config]));
@@ -76,14 +77,20 @@ module.exports=async(req,res)=>{
     let accountExists=true;
     if(typeof admin.auth==='function'){try{await admin.auth().getUser(order.uid);}catch(e){if(e.code==='auth/user-not-found')accountExists=false;else throw e;}}
     let granted=accountExists;
+    const providerPaidAt=entitlement.paidAt({pay_date:value(body,'pay_date')});
+    const orderSecond=Math.floor(entitlement.ms(order.createdAtMs)/1000)*1000;
+    const approvedAt=providerPaidAt>0&&providerPaidAt>=orderSecond&&providerPaidAt<=now?providerPaidAt:now;
+    const expiresAtMs=reportOrder && order.reportRetentionVersion===1 ? retention.anniversary(approvedAt) : null;
     if(reportOrder){
-     granted=accountExists&&userSnap.exists&&!!report&&!report.ready&&(!reportOrder.storyReport||report.orderId===orderId);
-     if(granted)tx.update(reportRef,{ready:true,readyAtMs:now,state:'ready',paidOrderId:orderId});
+     granted=accountExists&&userSnap.exists&&!!report&&!report.ready&&report.orderId===orderId;
+     if(granted)tx.update(reportRef,{ready:true,readyAtMs:now,state:'ready',paidOrderId:orderId,
+       ...(expiresAtMs&&{[retention.FIELD]:new Date(expiresAtMs)})});
     }else if(accountExists){
      const patch=entitlement.grantPatch(user,orderId,order.product,now,order.planVersion);
      tx.set(userRef,{...patch,lastOrderId:orderId,lastPurchaseAt:now,lastVerificationMethod:order.product==='taekilso_premium_30days'?'server-verified':user.lastVerificationMethod||'server-verified',lastMulNoGranted:mulNo},{merge:true});
     }
-    tx.update(orderRef,{status:'paid',mul_no:mulNo,pay_state:4,lastPayState:4,paidAtMs:now,entitlementVersion:1,entitlementGranted:granted,entitlementReviewRequired:!granted,pay_type:value(body,'pay_type').slice(0,20),pay_date:value(body,'pay_date').slice(0,40),updatedAt:admin.firestore.FieldValue.serverTimestamp()});
+    tx.update(orderRef,{status:'paid',mul_no:mulNo,pay_state:4,lastPayState:4,paidAtMs:now,entitlementVersion:1,entitlementGranted:granted,entitlementReviewRequired:!granted,
+     ...(granted&&expiresAtMs&&{reportExpiresAtMs:expiresAtMs}),pay_type:value(body,'pay_type').slice(0,20),pay_date:value(body,'pay_date').slice(0,40),updatedAt:admin.firestore.FieldValue.serverTimestamp()});
     tx.set(db.collection('stats').doc('counters'),{purchases:admin.firestore.FieldValue.increment(1),revenue:admin.firestore.FieldValue.increment(amount),purchasesByProduct:{[order.product]:admin.firestore.FieldValue.increment(1)}},{merge:true});
    }else if(cancellation){
     const alreadyFull=['cancelled','refunded'].includes(order.status),priorRefund=Math.max(0,Number(order.refundedAmount)||0);

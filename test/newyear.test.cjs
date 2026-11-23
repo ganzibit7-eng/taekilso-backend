@@ -54,6 +54,34 @@ test('standalone annual orders unlock the annual report only and a refunded orde
  assert.equal(f.calls(),1);
 });
 test('one report per account/year is cached, readable after expiry and locked to its profile',async()=>{const f=serviceFixture(),r=res();await f.handler({body:{operation:'generate',profile}},r);assert.equal(r.code,200);assert(validReport(r.body.report));const cached=res();await f.handler({body:{operation:'generate',profile}},cached);assert.equal(f.calls(),1);const mismatch=res();await f.handler({body:{operation:'generate',profile:{...profile,d:2}}},mismatch);assert.equal(mismatch.code,409);f.rows.set('users/member',{premium:false});const read=res();await f.handler({body:{operation:'status',uid:'someone-else'}},read);assert.equal(read.body.status,'ready');assert.equal(read.body.access,false);assert.equal(f.calls(),1);assert(f.rows.has('newyearReports/'+reportId('member')));});
+test('new standalone annual report follows its purchase deadline and cannot leak through an old return link',async()=>{
+ const annual=require('../lib/newyear-purchase'),{FIELD}=require('../lib/report-retention');
+ const f=serviceFixture({premium:false}),orderId='TAK-ANNUAL-RETENTION',deadline=Date.now()+86400000;
+ const orderKey='paymentOrders/'+orderId,bodyKey='newyearReports/'+reportId('member');
+ const purchaseKey='users/member/'+annual.CONFIG.collection+'/'+annual.id;
+ const purchased={...order,product:annual.CONFIG.product,amount:annual.CONFIG.price,
+  [annual.CONFIG.orderKey]:annual.id,entitlementGranted:true,reportExpiresAtMs:deadline};
+ f.rows.set(purchaseKey,{ready:true,orderId,paidOrderId:orderId,[FIELD]:new Date(deadline)});
+ f.rows.set(orderKey,purchased);
+ const generated=res();
+ await f.handler({body:{operation:'generate',profile}},generated);
+ assert.equal(generated.code,200);
+ assert.equal(generated.body.expiresAtMs,deadline);
+ assert.equal(f.rows.get(bodyKey).purchaseOrderId,orderId);
+ assert.equal(+f.rows.get(bodyKey)[FIELD],deadline);
+ const expired=Date.now()-1;
+ f.rows.set(orderKey,{...purchased,reportExpiresAtMs:expired});
+ f.rows.set(purchaseKey,{...f.rows.get(purchaseKey),[FIELD]:new Date(expired)});
+ f.rows.set(bodyKey,{...f.rows.get(bodyKey),[FIELD]:new Date(expired)});
+ const result=res();await f.handler({body:{operation:'checkout-status',orderId}},result);
+ assert.equal(result.body.access,false);
+ assert.equal(result.body.report,null);
+ assert.equal(result.body.paymentState,'expired');
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const available=res();await f.handler({body:{operation:'prepare-purchase'}},available);
+ assert.equal(available.body.state,'available');
+ assert.equal(f.calls(),1);
+});
 test('invalid/truncated generation fails without spending chat credits',async()=>{const f=serviceFixture(premium,async()=>({ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})})),r=res();await f.handler({body:{operation:'generate',profile}},r);assert.equal(r.code,503);assert.equal(f.rows.get('newyearReports/'+reportId('member')).status,'failed');assert.equal(f.rows.get('users/member').aiFreeUsed,undefined);});
 test('concurrent report generation claims a single provider request',async()=>{let unlock,started;const signal=new Promise(r=>started=r),wait=new Promise(r=>unlock=r);const f=serviceFixture(premium,async(...args)=>{started();await wait;return {ok:true,json:async()=>({stop_reason:'tool_use',content:[{type:'tool_use',name:'write_newyear_report',input:withChecks(args[1])}]})}});const first=res(),running=f.handler({body:{operation:'generate',profile}},first);await signal;const second=res();await f.handler({body:{operation:'generate',profile}},second);assert.equal(second.code,202);unlock();await running;assert.equal(first.code,200);assert.equal(f.calls(),1);});
 
