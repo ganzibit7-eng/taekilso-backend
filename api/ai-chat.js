@@ -4,6 +4,7 @@
 const admin = require('firebase-admin');
 const newyearAccess = require('../lib/newyear-access');
 const {assertMemberAllowed} = require('../lib/member-access');
+const {isAdminEmail,canOpenAdminReports} = require('../lib/admin-access');
 const {consumeCreditPatch,rollbackCreditPatch,ms,premiumQuestionUsage,isQuestionPlanOrder} = require('../lib/payment-entitlements');
 const {recordMilestone} = require('../lib/consultation-metrics');
 const consultationService = require('../lib/consultation-service');
@@ -50,9 +51,6 @@ const PREMIUM_DAILY_LIMIT = 10;
 
 // 관리자 계정은 Firebase가 검증한 로그인 토큰의 이메일로만 판별합니다.
 // 클라이언트가 보내는 email/uid 값은 관리자 판별에 사용하지 않습니다.
-const ADMIN_EMAILS = new Set([
-  'green092432@gmail.com'
-]);
 const ADMIN_DAILY_LIMIT = 100;
  
 // 비용 및 컨텍스트 관리를 위해 최근 대화만 전달
@@ -299,7 +297,7 @@ async function reserveUsageAtomic(uid, isAdminUser = false, reportScope) {
     if (!userSnap.exists) throw usageError('USER_NOT_FOUND');
     const userData = userSnap.data() || {};
 
-    if (reportScope) return reportScope.service.reserve(db,tx,uid,reportScope.id,reportScope.chapter,userData);
+    if (reportScope) return reportScope.service.reserve(db,tx,uid,reportScope.id,reportScope.chapter,userData,reportScope.adminAccess);
 
     // 관리자 계정은 프리미엄/무료/질문권 여부와 무관하게 KST 기준 하루 100회.
     if (isAdminUser) {
@@ -472,6 +470,7 @@ async function authenticateRequest(req) {
           return {
             uid: decoded.uid,
             provider: 'firebase',
+            signInProvider: decoded.firebase?.sign_in_provider,
             email: String(decoded.email || '').trim().toLowerCase(),
             email_verified: decoded.email_verified === true
           };
@@ -555,7 +554,6 @@ module.exports = async (req, res) => {
 
   if (req.body && req.body.action === 'newyear-report') {
     try { return await createNewyearService({db, apiKey: ANTHROPIC_API_KEY, model: ANTHROPIC_MODEL,
-      isAdminEmail: email => ADMIN_EMAILS.has(String(email || '').trim().toLowerCase()),
       authenticate: async request => {
         const identity = await authenticateRequest(request);
         if (identity && identity.provider === 'firebase') {
@@ -621,7 +619,7 @@ module.exports = async (req, res) => {
     // body.uid/email은 호환용 참고값일 뿐입니다. 권한 판단에는 검증된 토큰 정보만 사용합니다.
     const uid = identity.uid;
     const verifiedEmail = String(identity.email || '').trim().toLowerCase();
-    const isAdminUser = identity.email_verified === true && !!verifiedEmail && ADMIN_EMAILS.has(verifiedEmail);
+    const isAdminUser = identity.email_verified === true && isAdminEmail(verifiedEmail);
 
     if (claimedUid && String(claimedUid) !== uid) {
       console.warn('[ai-chat] client uid mismatch ignored:', String(claimedUid), '=>', uid);
@@ -684,7 +682,7 @@ module.exports = async (req, res) => {
         return res.status(400).json({error:'FEATURED_REPORT_SCOPE',message:'리포트에 포함된 상담은 해당 리포트의 상담사에게 사용할 수 있어요.',usageCharged:false});
       }
       reportScope={service:reportService,id:legacyReport?req.body.seohwaReportId:req.body.featuredReportId,
-        chapter:legacyReport?req.body.seohwaChapter:req.body.featuredReportChapter};
+        chapter:legacyReport?req.body.seohwaChapter:req.body.featuredReportChapter,adminAccess:canOpenAdminReports(identity)};
     }
     if(reportService&&!reportScope){
       return res.status(403).json({error:'FEATURED_REPORT_PURCHASE_REQUIRED',message:'이 상담사에게는 해당 리포트에 포함된 상담 3회를 사용할 수 있어요. 구매한 리포트에서 상담을 시작해 주세요.',usageCharged:false});
@@ -961,8 +959,8 @@ module.exports = async (req, res) => {
 
     if (reportScope) {
       try {
-        const {data} = await reportScope.service.paidReport(db,uid,reportScope.id);
-        if (data.paidOrderId !== usageReservation.orderId) throw new Error('FEATURED_REPORT_ORDER_CHANGED');
+        const {data} = await reportScope.service.paidReport(db,uid,reportScope.id,null,reportScope.adminAccess);
+        if (!reportScope.service.sameAccess(data,usageReservation)) throw new Error('FEATURED_REPORT_ORDER_CHANGED');
       } catch {
         await rollbackUsageReservation(uid,usageReservation);
         return res.status(409).json({error:'SEOHWA_REPORT_REQUIRED',message:'리포트의 이용 상태가 바뀌었어요. 내 기록에서 확인해 주세요.',usageCharged:false});

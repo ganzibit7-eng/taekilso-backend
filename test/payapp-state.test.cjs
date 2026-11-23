@@ -205,6 +205,85 @@ test('report orders started before the notice keep their original access terms',
  assert.equal(opened.expiresAtMs,undefined);
 });
 
+test('administrator-only report grants use the verified Google identity and never create orders',async()=>{
+ const f=fixture(),account=require('../lib/account-report');
+ const service=seohwa.reports.get('dogyeom');
+ const {ADMIN_EMAIL:ownerEmail}=require('../lib/admin-access');
+ const verified={uid:'member',email:ownerEmail,email_verified:true,firebase:{sign_in_provider:'google.com'}};
+ const identities={
+  owner:verified,
+  member:{...verified,uid:'other',email:'other@example.test'},
+  unverified:{...verified,email_verified:false},
+  otherProvider:{...verified,firebase:{sign_in_provider:'custom'}},
+ };
+ f.rows.set('users/other',{premium:false});
+ f.rows.set('siteSettings/checkout',{enabled:false});
+ const filename=path.resolve(__dirname,'../lib/account-report-handler.js');
+ const originalRequire=createRequire(filename),runtime={module:{exports:{}},require:name=>name==='firebase-admin'?
+  {firestore:()=>f.db,auth:()=>({verifyIdToken:async(token,revocationCheck)=>{
+    assert.equal(revocationCheck,true);return identities[token]||null;
+  }})}:originalRequire(name)};
+ vm.runInNewContext(fs.readFileSync(filename,'utf8'),runtime,{filename});
+ const forService=run=>{
+  const handle=runtime.module.exports(run,'test');
+  return async (token,body)=>{
+   const res={setHeader(){},status(code){this.code=code;return this},json(value){this.value=value;return this}};
+   await handle({method:'POST',headers:token?{authorization:'Bearer '+token}:{},body},res);
+   return res;
+  };
+ };
+ const featured=forService(service.run);
+ const request={operation:'admin-open',comparison:seohwaComparison,admin:true,adminPreview:true,email:ownerEmail,uid:'member'};
+ const before=f.rows.size;
+ for(const token of ['', 'member', 'unverified', 'otherProvider']){
+  const denial=await featured(token,request);
+  assert.equal(denial.code,token?403:401);
+ }
+ assert.equal(f.rows.size,before);
+ const granted=await featured('owner',request);
+ assert.equal(granted.code,200);
+ assert.equal(granted.value.state,'paid');
+ assert.equal(granted.value.adminPreview,true);
+ assert.equal((await featured('owner',request)).value.id,granted.value.id);
+ const id=granted.value.id;
+ assert.equal((await featured('member',{operation:'open',id})).code,404);
+ assert.equal((await featured('unverified',{operation:'open',id})).code,404);
+ assert.equal((await featured('unverified',{operation:'generate',id})).code,403);
+ assert.equal((await featured('unverified',{operation:'list'})).value.reports.length,0);
+ assert.equal((await featured('owner',{operation:'list'})).value.reports[0].adminPreview,true);
+ await seohwaTransfer.manage(f.db,'other',{operation:'grant',noticeVersion:seohwaTransfer.NOTICE_VERSION,expectedRevision:0});
+ assert.equal((await featured('member',{...seohwaCheckout,adminPreview:true})).value.state,'paused');
+ const row=f.rows.get('users/member/dogyeomReports/'+id);
+ row.report.body=[{title:'제목',highlight:'요약',basis:{meaning:'근거'}}];
+ await assert.rejects(f.db.runTransaction(tx=>service.reserve(f.db,tx,'member',id,0,{})),{status:403});
+ const reservation=await f.db.runTransaction(tx=>service.reserve(f.db,tx,'member',id,0,{},true));
+ assert.equal(reservation.reportQuestionsLeft,2);
+ assert.equal(service.sameAccess(row,reservation),true);
+ assert.equal(service.sameAccess({...row,createdAtMs:row.createdAtMs+1},reservation),false);
+ await service.rollback(f.db,'member',reservation);
+ assert.equal(f.rows.get('users/member/dogyeomReports/'+id).questionsUsed,0);
+ for(const [report,comparison] of [
+  [require('../lib/date-report'),dateComparison],
+  [require('../lib/relationship-report'),{first:1,second:14}],
+ ]){
+  const call=forService(report.run);
+  assert.equal((await call('member',{operation:'admin-open',comparison})).code,403);
+  const opened=await call('owner',{operation:'admin-open',comparison});
+  assert.equal(opened.value.state,'ready');
+  assert.equal(opened.value.adminPreview,true);
+  assert.equal((await call('unverified',{operation:'open',id:opened.value.id})).code,404);
+ }
+ assert.equal([...f.rows.keys()].filter(key=>key.startsWith('paymentOrders/')).length,1);
+ assert.equal(f.rows.has('stats/counters'),false);
+ const standard=await account.run(service.CONFIG,f.db,'member',{operation:'prepare',comparison:seohwaComparison});
+ assert.equal(standard.state,'paused');
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const regularOrder=await featured('member',{...seohwaCheckout,adminPreview:true});
+ assert.equal(regularOrder.value.state,'checkout');
+ assert.equal(regularOrder.value.price,5900);
+ assert.equal(regularOrder.value.adminPreview,undefined);
+});
+
 test('신년운세 단품의 승인·중복 통보·환불은 해당 리포트만 바꾼다',async()=>{
  const f=fixture();
  const annual=require('../lib/newyear-purchase'),account=require('../lib/account-report');
