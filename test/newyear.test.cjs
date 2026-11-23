@@ -36,10 +36,13 @@ function serviceFixture(user=premium,provider){const f=memory({'users/member':{a
 test('free report generation is refused before provider or report writes',async()=>{const f=serviceFixture({premium:false,aiQuestionCredits:99}),r=res();await f.handler({body:{operation:'generate',profile,premium:true}},r);assert.equal(r.code,403);assert.equal(r.body.usageCharged,false);assert.equal(f.calls(),0);assert.equal(f.events.length,0);});
 test('the verified Google administrator can access the annual report with checkout closed',async()=>{
  const {ADMIN_EMAIL}=require('../lib/admin-access'),f=memory({'users/member':{premium:false}});
+ f.rows.set('newyearReports/'+reportId('member'),{status:'ready',report,adminGrant:true,
+  profile:calculate(profile).profile,calculation:calculate(profile)});
  for(const [email_verified,signInProvider,access] of [[true,'google.com',true],[false,'google.com',false],[true,'custom',false]]){
   const handle=createService({db:f.db,authenticate:async()=>({uid:'member',email:ADMIN_EMAIL,email_verified,signInProvider})});
   const answer=res();await handle({body:{operation:'status'}},answer);
   assert.equal(answer.body.access,access);
+  assert.equal(Boolean(answer.body.report),access);
  }
  assert.equal(f.events.length,0);
 });
