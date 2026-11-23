@@ -5,9 +5,9 @@ function fixture(options={}){const rows=new Map([['users/member',{premium:false}
  function put(key,value,merge=true){rows.set(key,apply(merge?rows.get(key):{},value));}
  const ref=key=>({id:key.split('/').at(-1),async get(){return {id:this.id,exists:rows.has(key),data:()=>rows.get(key)}},async set(v,o){put(key,v,o?.merge)},async update(v){put(key,v)},collection:name=>collection(key+'/'+name),key});
  const collection=col=>({doc:id=>ref(col+'/'+id),where(field,op,value){return {select(){return this},limit(){return this},orderBy(){return this},async get(){return {docs:[...rows].filter(([k,v])=>k.startsWith(col+'/')&&(op==='>'?v[field]>value:v[field]===value)).map(([k,v])=>({id:k.split('/').at(-1),data:()=>v}))}}}}});
- const db={collection,runTransaction(fn){const job=queue.then(()=>fn({get:r=>r.get(),set(r,v,o){put(r.key,v,o?.merge)},create(r,v){assert(!rows.has(r.key));put(r.key,v,false)},update(r,v){put(r.key,v)}}));queue=job.catch(()=>{});return job}};
+ const db={collection,runTransaction(fn){const job=queue.then(()=>fn({get:r=>r.get(),set(r,v,o){put(r.key,v,o?.merge===true)},create(r,v){assert(!rows.has(r.key));put(r.key,v,false)},update(r,v){put(r.key,v)}}));queue=job.catch(()=>{});return job}};
  const admin={apps:[{}],firestore:()=>db};if(options.deleted)admin.auth=()=>({async getUser(){throw Object.assign(new Error('gone'),{code:'auth/user-not-found'})}});admin.firestore.FieldValue={increment:n=>({increment:n}),serverTimestamp:()=>Date.now()};
- const filename=path.resolve(__dirname,'../api/payapp-feedback.js'),realRequire=createRequire(filename),context={module:{exports:{}},require:n=>n==='firebase-admin'?admin:realRequire(n),process:{env:{PAYAPP_LINKVAL:'test-only'}},Buffer,console:{error(){},warn(){},log(){}}};vm.runInNewContext(fs.readFileSync(filename,'utf8'),context,{filename});
+ const filename=path.resolve(__dirname,'../api/payapp-feedback.js'),realRequire=createRequire(filename),context={module:{exports:{}},require:n=>n==='firebase-admin'?admin:realRequire(n),process:{env:{PAYAPP_LINKVAL:'test-only'}},Buffer,Date,console:{error(){},warn(){},log(){}}};vm.runInNewContext(fs.readFileSync(filename,'utf8'),context,{filename});
  async function notify(state,override={}){const r={setHeader(){},status(n){this.code=n;return this},send(v){this.body=v;return this}};await context.module.exports({method:'POST',body:{userid:'green5797',linkval:'test-only',var1:'TAK-TEST-ORDER',goodname:'2027 신년상담 · 30일 이용권',price:8900,pay_state:state,mul_no:'synthetic',...override}},r);return r;}
  Object.assign(context.process.env,options.env||{});
  return {rows,db,notify};}
@@ -97,7 +97,7 @@ test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 �
  assert.equal((await f.notify(4,payAppCallback)).body,'SUCCESS');
  assert.equal((await f.notify(4,callback)).body,'SUCCESS');
  f.rows.set('siteSettings/checkout',{enabled:false});
- assert.deepEqual(await seohwa.run(f.db,'member',status),{state:'paid',id});
+ assert.deepEqual(await seohwa.run(f.db,'member',status),{state:'paid',id,expiresAtMs:f.rows.get('paymentOrders/'+orderId).reportExpiresAtMs});
  assert.equal((await seohwa.run(f.db,'member',{operation:'open',id})).state,'paid');
  const result=seohwa.generate(f.db,'member',id,settings);
  await started;
@@ -137,6 +137,74 @@ test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 �
 });
 const dateComparison={event:'결혼식',days:['2027-05-15','2027-05-16','2027-05-23'],mine:'화',partner:'목'};
 
+test('report expiry uses the Korean calendar anniversary, including leap days',()=>{
+ const {anniversary}=require('../lib/report-retention');
+ for(const [paid,expiry] of [
+  ['2026-11-23T10:20:30+09:00','2027-11-23T10:20:30+09:00'],
+  ['2028-02-29T00:15:00+09:00','2029-02-28T00:15:00+09:00'],
+  ['2027-03-01T00:15:00+09:00','2028-03-01T00:15:00+09:00'],
+ ])assert.equal(anniversary(Date.parse(paid)),Date.parse(expiry));
+});
+
+test('new paid reports expire at the deadline and a later purchase is a separate order',async()=>{
+ const {anniversary,FIELD}=require('../lib/report-retention'),account=require('../lib/account-report');
+ const f=fixture(),service=seohwa.reports.get('dogyeom');
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ await seohwaTransfer.manage(f.db,'member',{operation:'grant',noticeVersion:seohwaTransfer.NOTICE_VERSION,expectedRevision:0});
+ const initial=await service.run(f.db,'member',seohwaCheckout);
+ const event={var1:initial.orderId,price:initial.price,goodname:initial.name};
+ assert.equal((await f.notify(4,event)).body,'SUCCESS');
+ const order=f.rows.get('paymentOrders/'+initial.orderId),deadline=anniversary(order.paidAtMs);
+ const key='users/member/dogyeomReports/'+initial.id;
+ const owned={operation:'open',id:initial.id};
+ assert.equal(+f.rows.get(key)[FIELD],deadline);
+ assert.equal(order.reportExpiresAtMs,deadline);
+ assert.equal((await f.notify(4,event)).body,'SUCCESS');
+ assert.equal((await service.run(f.db,'member',owned)).expiresAtMs,deadline);
+ assert.equal((await account.run(service.CONFIG,f.db,'member',owned,deadline-1)).state,'ready');
+ assert.equal((await account.run(service.CONFIG,f.db,'member',owned,deadline)).state,'expired');
+ assert.equal((await account.run(service.CONFIG,f.db,'member',{operation:'list'},deadline)).reports.length,0);
+ f.rows.set(key,{...f.rows.get(key),[FIELD]:new Date(Date.now()-1)});
+ await assert.rejects(f.db.runTransaction(tx=>service.reserve(f.db,tx,'member',initial.id,1,{})),{code:'REPORT_EXPIRED'});
+
+ const renewal=await account.run(service.CONFIG,f.db,'member',seohwaCheckout,deadline);
+ assert.equal(renewal.state,'checkout');
+ assert.equal(renewal.id,initial.id);
+ assert.notEqual(renewal.orderId,initial.orderId);
+ assert.equal((await f.notify(9,event)).body,'SUCCESS');
+ assert.equal(f.rows.get(key).orderId,renewal.orderId);
+ assert.equal(f.rows.get(key).state,'pending');
+ const renewedEvent={...event,var1:renewal.orderId,mul_no:'another-order'};
+ assert.equal((await f.notify(4,renewedEvent)).body,'SUCCESS');
+ assert.equal(f.rows.get(key).paidOrderId,renewal.orderId);
+});
+
+test('delayed PayApp callback uses the sale approval date for report retention',async()=>{
+ const f=fixture(),account=require('../lib/account-report'),relationship=require('../lib/relationship-report');
+ const {anniversary}=require('../lib/report-retention');
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const approved=Date.parse('2026-02-19T13:10:20+09:00');
+ const result=await account.run(relationship.CONFIG,f.db,'member',{
+  operation:'prepare',checkout:true,comparison:{first:1,second:2}
+ },approved-1000);
+ const event={var1:result.orderId,price:result.price,goodname:result.name,pay_date:'2026-02-19 13:10:20'};
+ assert.equal((await f.notify(4,event)).body,'SUCCESS');
+ assert.equal(f.rows.get('paymentOrders/'+result.orderId).reportExpiresAtMs,anniversary(approved));
+});
+
+test('report orders started before the notice keep their original access terms',async()=>{
+ const f=fixture(),account=require('../lib/account-report'),relationship=require('../lib/relationship-report');
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const made=await account.run(relationship.CONFIG,f.db,'member',{operation:'prepare',checkout:true,comparison:{first:1,second:2}});
+ const row=f.rows.get('paymentOrders/'+made.orderId);
+ delete row.reportRetentionVersion;
+ const event={var1:made.orderId,price:made.price,goodname:made.name};
+ assert.equal((await f.notify(4,event)).body,'SUCCESS');
+ const opened=await account.run(relationship.CONFIG,f.db,'member',{operation:'open',id:made.id},Date.now()+5*365*86400000);
+ assert.equal(opened.state,'ready');
+ assert.equal(opened.expiresAtMs,undefined);
+});
+
 test('신년운세 단품의 승인·중복 통보·환불은 해당 리포트만 바꾼다',async()=>{
  const f=fixture();
  const annual=require('../lib/newyear-purchase'),account=require('../lib/account-report');
@@ -155,6 +223,10 @@ test('신년운세 단품의 승인·중복 통보·환불은 해당 리포트�
  assert.equal((await f.notify(4,event)).body,'SUCCESS');
  assert.equal(await annual.entitled(f.db,'member'),true);
  assert.equal(await annual.paymentState(f.db,'member',created.orderId),'paid');
+ const granted=await annual.grant(f.db,'member');
+ assert.equal((await annual.grant(f.db,'member',null,granted.expiresAtMs-1)).orderId,created.orderId);
+ assert.equal(await annual.grant(f.db,'member',null,granted.expiresAtMs),null);
+ assert.equal(await annual.paymentState(f.db,'member',created.orderId,granted.expiresAtMs),'expired');
  assert.equal(f.rows.get('stats/counters').revenue,6900);
  assert.deepEqual(f.rows.get('users/member'),existing);
  assert.equal((await f.notify(9,event)).body,'SUCCESS');
