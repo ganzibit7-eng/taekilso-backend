@@ -185,7 +185,7 @@ test('delayed PayApp callback uses the sale approval date for report retention',
  f.rows.set('siteSettings/checkout',{enabled:true});
  const approved=Date.parse('2026-02-19T13:10:20+09:00');
  const result=await account.run(relationship.CONFIG,f.db,'member',{
-  operation:'prepare',checkout:true,comparison:{first:1,second:2}
+  operation:'prepare',checkout:true,expectedPrice:3900,comparison:{first:1,second:2}
  },approved-1000);
  const event={var1:result.orderId,price:result.price,goodname:result.name,pay_date:'2026-02-19 13:10:20'};
  assert.equal((await f.notify(4,event)).body,'SUCCESS');
@@ -195,7 +195,7 @@ test('delayed PayApp callback uses the sale approval date for report retention',
 test('report orders started before the notice keep their original access terms',async()=>{
  const f=fixture(),account=require('../lib/account-report'),relationship=require('../lib/relationship-report');
  f.rows.set('siteSettings/checkout',{enabled:true});
- const made=await account.run(relationship.CONFIG,f.db,'member',{operation:'prepare',checkout:true,comparison:{first:1,second:2}});
+ const made=await account.run(relationship.CONFIG,f.db,'member',{operation:'prepare',checkout:true,expectedPrice:3900,comparison:{first:1,second:2}});
  const row=f.rows.get('paymentOrders/'+made.orderId);
  delete row.reportRetentionVersion;
  const event={var1:made.orderId,price:made.price,goodname:made.name};
@@ -473,22 +473,24 @@ test('a single payment issues one account-bound date report; refund removes only
  assert.equal(f.rows.get('stats/counters').revenue,0);
  assert.equal(f.rows.get('users/member').aiQuestionCredits,7);
 });
-test('5,900-won relationship report stays paused for everyone and issues only to its purchaser after confirmation',async()=>{
+test('3,900-won relationship report stays paused for everyone and issues only to its purchaser after confirmation',async()=>{
  const f=fixture();
  const relationship=require('../lib/relationship-report');
- const purchaseRequest={operation:'prepare',comparison:{first:2,second:5},checkout:true};
+ const purchaseRequest={operation:'prepare',comparison:{first:2,second:5},checkout:true,expectedPrice:3900};
  await f.notify(4); // Existing premium still applies only to its included benefits.
  assert.deepEqual(await relationship.run(f.db,'member',purchaseRequest),{state:'paused'});
  f.rows.set('siteSettings/checkout',{enabled:true});
+ await assert.rejects(relationship.run(f.db,'member',{...purchaseRequest,expectedPrice:5900}),{code:'REPORT_PRICE_CHANGED'});
+ await assert.rejects(relationship.run(f.db,'member',{...purchaseRequest,expectedPrice:undefined}),{code:'REPORT_PRICE_CHANGED'});
  const pending=await Promise.all([relationship.run(f.db,'member',purchaseRequest),relationship.run(f.db,'member',purchaseRequest)]);
  const purchase=pending.find(item=>item.state==='checkout');
  assert(purchase);
- assert.equal(purchase.price,5900);
+ assert.equal(purchase.price,3900);
  assert.equal(pending.filter(item=>item.state==='pending').length,1);
  assert.deepEqual(await relationship.run(f.db,'member',{operation:'open',id:purchase.id}),{state:'pending'});
  await assert.rejects(relationship.run(f.db,'other',{operation:'open',id:purchase.id}),{code:'REPORT_NOT_FOUND'});
- const pay={var1:purchase.orderId,price:5900,goodname:purchase.name};
- assert.equal((await f.notify(4,{...pay,price:3900})).body,'INVALID_PRICE');
+ const pay={var1:purchase.orderId,price:3900,goodname:purchase.name};
+ assert.equal((await f.notify(4,{...pay,price:5900})).body,'INVALID_PRICE');
  assert.equal((await f.notify(4,{...pay,goodname:dateReport.NAME})).body,'INVALID_PRODUCT_NAME');
  assert.equal((await f.notify(4,pay)).body,'SUCCESS');
  assert.equal((await f.notify(4,pay)).body,'SUCCESS');
@@ -506,21 +508,23 @@ test('5,900-won relationship report stays paused for everyone and issues only to
  const compact=await relationship.run(f.db,'member',{operation:'list',summaryOnly:true});
  assert.deepEqual(compact.reports[0].days,stored.report.people.map(person=>person.day));
  assert.equal(compact.reports[0].report,undefined);
- assert.equal(f.rows.get('stats/counters').revenue,14800);
+ assert.equal(f.rows.get('stats/counters').revenue,12800);
  assert.equal((await f.notify(9,pay)).body,'SUCCESS');
  assert.equal((await relationship.run(f.db,'member',{operation:'list'})).reports.length,0);
  assert.equal(f.rows.get('users/member').premium,true);
  assert.equal(f.rows.get('stats/counters').revenue,8900);
 });
-test('a signed unpaid report notification resumes the same checkout and an outstanding transfer cannot be reopened',async()=>{
+test('an existing 5,900-won relationship order resumes and refunds at its original amount',async()=>{
  const relationship=require('../lib/relationship-report');
- const f=fixture(), input={operation:'prepare',comparison:{first:2,second:5},checkout:true,allowResume:true};
+ const account=require('../lib/account-report');
+ const f=fixture(), input={operation:'prepare',comparison:{first:2,second:5},checkout:true,allowResume:true,expectedPrice:3900};
  f.rows.set('siteSettings/checkout',{enabled:true});
- const order=await relationship.run(f.db,'member',input);
+ const legacy={...relationship.CONFIG,price:5900};
+ const order=await account.run(legacy,f.db,'member',{...input,expectedPrice:5900});
  const pay={var1:order.orderId,price:5900,goodname:order.name,payurl:'http://payapp.kr/000000000000'};
  await f.notify(1,pay);
  const resume=await relationship.run(f.db,'member',input,Date.now()+45*60*1000);
- assert.deepEqual(resume,{state:'resume',id:order.id,resumeUrl:'https://payapp.kr/000000000000'});
+ assert.deepEqual(resume,{state:'resume',id:order.id,resumeUrl:'https://payapp.kr/000000000000',price:5900});
  const open={operation:'open',id:order.id,allowResume:true};
  assert.deepEqual(await relationship.run(f.db,'member',open),resume);
  await assert.rejects(relationship.run(f.db,'other',open),{code:'REPORT_NOT_FOUND'});
@@ -529,9 +533,13 @@ test('a signed unpaid report notification resumes the same checkout and an outst
  f.rows.set('siteSettings/checkout',{enabled:true});
  await f.notify(10,pay);
  assert.equal((await relationship.run(f.db,'member',input)).waiting,'deposit');
- await f.notify(4,pay);
+ assert.equal((await f.notify(4,pay)).body,'SUCCESS');
  assert.equal((await relationship.run(f.db,'member',open)).state,'ready');
  assert.equal([...f.rows.values()].filter(x=>x.product===relationship.CONFIG.product).length,1);
+ assert.equal(f.rows.get('stats/counters').revenue,5900);
+ assert.equal((await f.notify(9,pay)).body,'SUCCESS');
+ assert.equal(f.rows.get('stats/counters').revenue,0);
+ assert.equal((await relationship.run(f.db,'member',{operation:'list'})).reports.length,0);
 });
 
 test('renamed new year pass keeps the previous PayApp name valid for refunds',async()=>{
