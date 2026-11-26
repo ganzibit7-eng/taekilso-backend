@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const crypto = require('crypto');
+const {buildIdentifiers, findPermanentBan, findRejoinCooldown, assertFreshSession} = require('./_ban');
 
 const DEFAULT_ALLOWED_ORIGINS = new Set([
   'https://taekilso.com',
@@ -52,53 +52,6 @@ try {
   initError = e;
 }
 
-function norm(v){ return String(v || '').trim().toLowerCase(); }
-function sha(v){ return crypto.createHash('sha256').update(String(v || '')).digest('hex'); }
-
-async function identifiers(uid, decoded){
-  const ids = [`uid:${uid}`];
-  if (decoded && decoded.email) ids.push(`email:${norm(decoded.email)}`);
-  try {
-    const user = await admin.auth().getUser(uid);
-    if (user.email) ids.push(`email:${norm(user.email)}`);
-    (user.providerData || []).forEach(p => {
-      if (p && p.providerId && p.uid) ids.push(`provider:${p.providerId}:${p.uid}`);
-      if (p && p.email) ids.push(`email:${norm(p.email)}`);
-    });
-  } catch(e){}
-  if (String(uid).startsWith('kakao_')) ids.push(`provider:kakao:${String(uid).slice(6)}`);
-  return [...new Set(ids.filter(Boolean))];
-}
-
-async function getBan(ids){
-  for (const id of ids) {
-    const key = await db.collection('memberBanKeys').doc(sha(id)).get();
-    if (!key.exists) continue;
-    const banId = String((key.data() || {}).banId || '');
-    if (!banId) continue;
-    const banDoc = await db.collection('memberBans').doc(banId).get();
-    if (!banDoc.exists) continue;
-    const ban = banDoc.data() || {};
-    if (ban.active === false || ban.unbannedAt || ban.unbannedAtMs) continue;
-    return { banId, ...ban };
-  }
-  return null;
-}
-
-async function getCooldown(ids){
-  const now = Date.now();
-  for (const coll of ['rejoinBlockKeys', 'memberRejoinKeys']) {
-    for (const id of ids) {
-      const snap = await db.collection(coll).doc(sha(id)).get();
-      if (!snap.exists) continue;
-      const d = snap.data() || {};
-      const until = Number(d.rejoinAllowedAtMs || d.untilMs || 0);
-      if (until > now) return { ...d, rejoinAllowedAtMs: until };
-    }
-  }
-  return null;
-}
-
 module.exports = async (req, res) => {
   const originAllowed = applySecurityHeaders(req, res, 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') {
@@ -118,8 +71,9 @@ module.exports = async (req, res) => {
     const decoded = await admin.auth().verifyIdToken(header.slice(7).trim(), true);
     if (!decoded || !decoded.uid) return res.status(401).json({ error:'UNAUTHORIZED' });
 
-    const ids = await identifiers(decoded.uid, decoded);
-    const ban = await getBan(ids);
+    await assertFreshSession(db, decoded.uid, decoded.auth_time);
+    const ids = await buildIdentifiers(admin, db, decoded.uid, decoded);
+    const ban = await findPermanentBan(db, ids);
     if (ban) {
       return res.status(403).json({
         error:'ACCOUNT_BANNED',
@@ -128,7 +82,7 @@ module.exports = async (req, res) => {
       });
     }
 
-    const cooldown = await getCooldown(ids);
+    const cooldown = await findRejoinCooldown(db, ids);
     if (cooldown) {
       return res.status(403).json({
         error:'ACCOUNT_REJOIN_COOLDOWN',
@@ -139,6 +93,7 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({ ok:true, allowed:true, uid:decoded.uid });
   } catch (e) {
+    if (e.status === 401) return res.status(401).json({error:e.code, message:e.message});
     console.error('[member-access-status]', e);
     if (String(e && e.code || '').startsWith('auth/')) {
       return res.status(401).json({ error:'UNAUTHORIZED', message:'로그인 인증을 확인하지 못했습니다.' });

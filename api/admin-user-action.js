@@ -1,6 +1,5 @@
 const admin = require('firebase-admin');
-const {buildIdentifiers,createPermanentBan,deleteUserData}=require('./_ban');
-const crypto = require('crypto');
+const handleSecurityAction = require('./admin-member-security');
 
 let db = null;
 let initError = null;
@@ -10,18 +9,6 @@ const API_VERSION = '2026-09-delete-password-v3';
 const ADMIN_EMAILS = new Set([
   'green092432@gmail.com'
 ]);
-
-function safeSecretEqual(input, expected) {
-  const a = Buffer.from(String(input || ''), 'utf8');
-  const b = Buffer.from(String(expected || ''), 'utf8');
-
-  if (!a.length || !b.length || a.length !== b.length) {
-    return false;
-  }
-
-  return crypto.timingSafeEqual(a, b);
-}
-
 
 /* =========================
    Firebase Admin 초기화
@@ -134,43 +121,12 @@ async function writeAudit(
 
 
 /* =========================
-   하위 컬렉션 삭제
-========================= */
-
-async function deleteCollection(
-  collectionRef,
-  batchSize = 100
-) {
-  while (true) {
-    const snap =
-      await collectionRef
-        .limit(batchSize)
-        .get();
-
-    if (snap.empty) {
-      break;
-    }
-
-    const batch = db.batch();
-
-    snap.docs.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
-
-    await batch.commit();
-
-    if (snap.size < batchSize) {
-      break;
-    }
-  }
-}
-
-
-/* =========================
    API
 ========================= */
 
 module.exports = async (req, res) => {
+
+  if (['delete_user', 'force_delete'].includes(req.body?.action)) return handleSecurityAction(req, res);
 
   res.setHeader(
     'Access-Control-Allow-Origin',
@@ -268,104 +224,8 @@ module.exports = async (req, res) => {
     ========================= */
 
     if (action === 'grant_premium') {
-
-      const userRef =
-        db
-          .collection('users')
-          .doc(uid);
-
-      const snap =
-        await userRef.get();
-
-      const data =
-        snap.exists
-          ? (snap.data() || {})
-          : {};
-
-      let currentUntil = 0;
-
-      if (
-        data.premiumUntil &&
-        typeof data.premiumUntil.toMillis ===
-          'function'
-      ) {
-        currentUntil =
-          data.premiumUntil.toMillis();
-
-      } else {
-        currentUntil =
-          Number(
-            data.premiumUntil || 0
-          );
-      }
-
-      const now =
-        Date.now();
-
-      // 기존 프리미엄 기간이 남아 있으면
-      // 기존 만료일 뒤에 30일을 추가합니다.
-      const base =
-        currentUntil > now
-          ? currentUntil
-          : now;
-
-      const until =
-        base +
-        30 * 24 * 60 * 60 * 1000;
-
-
-      await userRef.set(
-        {
-          premium: true,
-
-          premiumUntil:
-            until,
-
-          grantedByAdmin:
-            true,
-
-          lastVerificationMethod:
-            'admin-grant',
-
-          lastAdminPremiumGrantAt:
-            admin.firestore
-              .FieldValue
-              .serverTimestamp()
-        },
-        {
-          merge: true
-        }
-      );
-
-
-      await writeAudit(
-        actor,
-        action,
-        uid,
-        {
-          premiumUntil:
-            until
-        }
-      );
-
-
-      return res.status(200).json({
-        ok: true,
-
-        action,
-        uid,
-
-        premium: true,
-
-        premiumUntil:
-          until,
-
-        apiVersion:
-          API_VERSION
-      });
+      return res.status(410).json({error:'PREMIUM_GRANT_RETIRED', message:'프리미엄 지급은 종료되었어요.'});
     }
-
-
 
     /* =========================
        프리미엄 회수
@@ -681,151 +541,6 @@ module.exports = async (req, res) => {
 
         questionCredits:
           after,
-
-        apiVersion:
-          API_VERSION
-      });
-    }
-
-
-
-    /* =========================
-       회원 강제탈퇴
-    ========================= */
-
-    if (
-      action === 'delete_user' ||
-      action === 'force_delete'
-    ) {
-
-      /*
-       * 강제탈퇴는 Firebase 관리자 인증에 더해
-       * Vercel에 저장한 별도 비밀번호를 요구합니다.
-       *
-       * 비밀번호를 이 코드에 직접 적지 마세요.
-       */
-      const expectedDeletePassword =
-        String(
-          process.env
-            .ADMIN_DELETE_PASSWORD ||
-          ''
-        );
-
-
-      if (!expectedDeletePassword) {
-
-        return res.status(503).json({
-          error:
-            'DELETE_PASSWORD_NOT_CONFIGURED',
-
-          message:
-            '강제탈퇴 비밀번호가 서버에 설정되지 않았습니다.'
-        });
-      }
-
-
-      if (
-        !safeSecretEqual(
-          body.deletePassword,
-          expectedDeletePassword
-        )
-      ) {
-
-        await writeAudit(
-          actor,
-          'delete_user_password_failed',
-          uid,
-          {
-            reason:
-              'password_mismatch'
-          }
-        );
-
-
-        return res.status(403).json({
-          error:
-            'DELETE_PASSWORD_INVALID',
-
-          message:
-            '강제탈퇴 비밀번호가 올바르지 않습니다.'
-        });
-      }
-
-
-      // 관리자 자기 자신 삭제 방지
-      if (uid === actor.uid) {
-
-        return res.status(400).json({
-          error:
-            'CANNOT_DELETE_SELF',
-
-          message:
-            '관리자 본인 계정은 강제탈퇴할 수 없습니다.'
-        });
-      }
-
-
-      const userRef =
-        db
-          .collection('users')
-          .doc(uid);
-
-
-      /*
-       * 개인정보 성격의 회원 하위 데이터는 삭제
-       */
-      const memberSnap=await userRef.get();
-      const member=memberSnap.exists?memberSnap.data():{};
-      const identifiers=await buildIdentifiers(admin,db,uid);
-      await createPermanentBan(admin,db,{uid,identifiers,email:member.email||'',nickname:member.nickname||'',provider:member.provider||'',adminUid:actor.uid});
-      await deleteUserData(db,uid);
-
-
-      /*
-       * Firebase Authentication 계정 삭제
-       */
-      try {
-
-        await admin
-          .auth()
-          .deleteUser(uid);
-
-      } catch (err) {
-
-        // Auth 계정이 이미 없는 경우에는
-        // 탈퇴 처리를 실패시키지 않습니다.
-        if (
-          !err ||
-          err.code !==
-            'auth/user-not-found'
-        ) {
-          throw err;
-        }
-      }
-
-
-      /*
-       * 결제/문의 기록은 회계·환불·분쟁 확인을 위해
-       * 여기서 삭제하지 않습니다.
-       */
-
-      await writeAudit(
-        actor,
-        action,
-        uid,
-        {
-          deleted: true
-        }
-      );
-
-
-      return res.status(200).json({
-        ok: true,
-
-        action,
-        uid,
-
-        deleted: true,
 
         apiVersion:
           API_VERSION

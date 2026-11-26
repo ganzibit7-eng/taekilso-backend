@@ -1,126 +1,94 @@
+'use strict';
+
 const admin = require('firebase-admin');
-const {
-  buildIdentifiers,
-  createPermanentBan,
-  unbanPermanent,
-  deleteUserData
-} = require('./_ban');
+const crypto = require('node:crypto');
+const {canOpenAdminReports} = require('../lib/admin-access');
+const {withdraw, retryWithdrawal, listRestrictions, release, validateId} = require('../lib/member-restrictions');
+const {deleteUserData} = require('./_ban');
 
-let db = null;
-let initError = null;
-try {
-  if (!admin.apps.length) {
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-    if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON 환경변수가 비어있습니다.');
-    admin.initializeApp({ credential: admin.credential.cert(JSON.parse(raw)) });
-  }
-  db = admin.firestore();
-} catch (e) { initError = e; }
-
-const ADMIN_EMAIL = 'green092432@gmail.com';
-
-async function requireAdmin(req) {
-  const header = String(req.headers.authorization || '').trim();
-  if (!header.startsWith('Bearer ')) throw Object.assign(new Error('관리자 로그인이 필요합니다.'), { status: 401, code: 'UNAUTHORIZED' });
-  const decoded = await admin.auth().verifyIdToken(header.slice(7).trim(), true);
-  const email = String(decoded.email || '').trim().toLowerCase();
-  if (!decoded.uid || decoded.email_verified!==true || email !== ADMIN_EMAIL) throw Object.assign(new Error('관리자 권한이 없습니다.'), { status: 403, code: 'FORBIDDEN' });
-  return decoded;
+function failure(status, code, message) {
+  return Object.assign(new Error(message), {status, code});
 }
 
-module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Cache-Control', 'no-store');
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'METHOD_NOT_ALLOWED' });
-  if (initError || !db) return res.status(500).json({ error: 'INIT_ERROR', message: initError ? initError.message : 'Firebase init failed' });
-
-  try {
-    const me = await requireAdmin(req);
-    const body = req.body || {};
-    const action = String(body.action || '');
-
-    if (action === 'list_bans') {
-      const snap = await db.collection('memberBans').limit(200).get();
-      const bans = [];
-      snap.forEach(doc => {
-        const b = doc.data() || {};
-        if (b.active === false || b.unbannedAt || b.unbannedAtMs) return;
-        bans.push({
-          banId: doc.id,
-          uid: b.uid || '',
-          email: b.email || '',
-          nickname: b.nickname || '',
-          provider: b.provider || '',
-          reason: b.reason || '',
-          bannedAtMs: Number(b.bannedAtMs || 0)
-        });
-      });
-      bans.sort((a, b) => b.bannedAtMs - a.bannedAtMs);
-      return res.status(200).json({ ok: true, bans });
-    }
-
-    if (action === 'unban_user') {
-      const banId = String(body.banId || '').trim();
-      if (!banId) return res.status(400).json({ error: 'INVALID_BAN_ID', message: 'banId가 필요합니다.' });
-      const ok = await unbanPermanent(admin, db, banId, me.uid);
-      if (!ok) return res.status(404).json({ error: 'BAN_NOT_FOUND', message: '밴 기록을 찾지 못했습니다.' });
-      return res.status(200).json({ ok: true, unbanned: true, banId });
-    }
-
-    if (action === 'force_delete') {
-      const uid = String(body.uid || '').trim();
-      const suppliedPassword = String(body.deletePassword || '');
-      const expectedPassword = String(process.env.ADMIN_DELETE_PASSWORD || '');
-      if (!expectedPassword) return res.status(500).json({ error: 'MISSING_ADMIN_DELETE_PASSWORD', message: 'ADMIN_DELETE_PASSWORD 환경변수가 비어있습니다.' });
-      if (!uid) return res.status(400).json({ error: 'INVALID_UID', message: 'uid가 필요합니다.' });
-      if (uid === me.uid) return res.status(400).json({ error: 'CANNOT_DELETE_SELF', message: '현재 로그인한 관리자 본인 계정은 강제탈퇴할 수 없습니다.' });
-      if (suppliedPassword !== expectedPassword) return res.status(403).json({ error: 'INVALID_DELETE_PASSWORD', message: '관리자 삭제 비밀번호가 올바르지 않습니다.' });
-
-      let record = null;
-      try { record = await admin.auth().getUser(uid); } catch (e) {
-        if (!e || e.code !== 'auth/user-not-found') throw e;
-      }
-      const userSnap = await db.collection('users').doc(uid).get();
-      const u = userSnap.exists ? (userSnap.data() || {}) : {};
-      const identifiers = await buildIdentifiers(admin, db, uid, null);
-      const email = String((record && record.email) || u.email || '').trim().toLowerCase();
-      const nickname = String(u.nickname || (record && record.displayName) || '');
-      const provider = String(u.provider || ((record && record.providerData && record.providerData[0] && record.providerData[0].providerId) || ''));
-
-      // 영구 밴이 저장된 뒤에만 실제 계정 데이터를 삭제합니다.
-      const ban = await createPermanentBan(admin, db, {
-        uid,
-        identifiers,
-        email,
-        nickname,
-        provider,
-        reason: 'admin_force_delete',
-        adminUid: me.uid
-      });
-
-      await deleteUserData(db, uid);
-      await admin.auth().deleteUser(uid).catch((err) => {
-        if (!err || err.code !== 'auth/user-not-found') throw err;
-      });
-
-      return res.status(200).json({
-        ok: true,
-        deleted: true,
-        permanentlyBanned: true,
-        banId: ban.banId
-      });
-    }
-
-    return res.status(400).json({ error: 'UNKNOWN_ACTION', message: '지원하지 않는 action입니다.' });
-  } catch (error) {
-    console.error('[admin-member-security] error:', error);
-    const status = Number(error && error.status) || (String(error && error.code || '').startsWith('auth/') ? 401 : 500);
-    return res.status(status).json({
-      error: (error && error.code) || 'SERVER_ERROR',
-      message: (error && error.message) || '관리자 보안 작업 중 오류가 발생했습니다.'
-    });
+async function requireAdmin(req, sdk) {
+  const header = String(req.headers?.authorization || '').trim();
+  if (!header.startsWith('Bearer ') || header.length > 8192) throw failure(401, 'UNAUTHORIZED', '관리자 로그인이 필요해요.');
+  const actor = await sdk.auth().verifyIdToken(header.slice(7).trim(), true);
+  if (!canOpenAdminReports({...actor, signInProvider:actor.firebase?.sign_in_provider})) {
+    throw failure(403, 'FORBIDDEN', '관리자만 사용할 수 있어요.');
   }
-};
+  return actor;
+}
+
+function requireDeleteProof(body, actor, uid) {
+  const expected = process.env.ADMIN_DELETE_PASSWORD;
+  const sent = typeof body.deletePassword === 'string' ? body.deletePassword : '';
+  if (sent) {
+    if (expected) {
+      const left = crypto.createHash('sha256').update(sent).digest();
+      const right = crypto.createHash('sha256').update(expected).digest();
+      if (crypto.timingSafeEqual(left, right)) return;
+    }
+    throw failure(403, 'INVALID_DELETE_PASSWORD', '관리자 삭제 비밀번호를 다시 확인해 주세요.');
+  }
+  const age = Date.now() / 1000 - actor.auth_time;
+  if (body.confirmUid !== uid || !Number.isInteger(actor.auth_time) || age < -30 || age > 300) {
+    throw failure(403, 'ADMIN_REAUTH_REQUIRED', '같은 관리자 Google 계정으로 다시 인증한 뒤 진행해 주세요.');
+  }
+}
+
+function restrictionKind(value) {
+  if (value === undefined || value === 'permanent') return 'permanent';
+  if (value === 'cooldown') return value;
+  throw failure(400, 'INVALID_RESTRICTION_KIND', '제한 종류를 확인해 주세요.');
+}
+
+function makeHandler(sdk, purge = deleteUserData) {
+  return async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Cache-Control', 'no-store');
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    if (req.method !== 'POST') return res.status(405).json({error:'METHOD_NOT_ALLOWED'});
+    try {
+      if (!sdk.apps.length) sdk.initializeApp({credential:sdk.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))});
+      const actor = await requireAdmin(req, sdk);
+      const db = sdk.firestore();
+      const body = req.body || {};
+      if (body.action === 'list_bans') {
+        if (body.identityQuery !== undefined && (typeof body.identityQuery !== 'string' || body.identityQuery.length > 320)) throw failure(400, 'INVALID_QUERY', '이메일 또는 회원 ID를 입력해 주세요.');
+        return res.status(200).json({ok:true, bans:await listRestrictions(db, body.identityQuery)});
+      }
+      if (body.action === 'unban_user') {
+        const kind = restrictionKind(body.kind);
+        const found = await release(sdk, db, kind, body.banId, actor);
+        if (!found) throw failure(404, 'BAN_NOT_FOUND', '이미 해제되었거나 만료된 기록이에요.');
+        return res.status(200).json({ok:true, unbanned:true, banId:body.banId});
+      }
+      if (['force_delete','delete_user','retry_withdrawal'].includes(body.action)) {
+        let job;
+        if (body.action === 'retry_withdrawal') {
+          const kind = restrictionKind(body.kind);
+          // Verify the exact stored subject before retrying, even for a passwordless confirmation.
+          job = await retryWithdrawal(sdk, db, kind, body.banId, actor, purge, uid => requireDeleteProof(body, actor, uid));
+        } else {
+          const uid = validateId(body.uid);
+          requireDeleteProof(body, actor, uid);
+          job = await withdraw(sdk, db, {uid, actor, deleteUserData:purge});
+        }
+        return res.status(200).json({ok:true, deleted:true, uid:job.uid, banId:job.id, identityScope:job.identityScope || null, permanentlyBanned:job.kind === 'permanent'});
+      }
+      return res.status(400).json({error:'UNKNOWN_ACTION', message:'지원하지 않는 작업이에요.'});
+    } catch (error) {
+      if (error.status) return res.status(error.status).json({error:error.code, message:error.message});
+      if (String(error.code || '').startsWith('auth/') && ['auth/id-token-expired','auth/id-token-revoked','auth/argument-error','auth/user-disabled','auth/user-not-found','auth/invalid-id-token'].includes(error.code)) {
+        return res.status(401).json({error:'UNAUTHORIZED', message:'관리자 로그인 상태를 다시 확인해 주세요.'});
+      }
+      console.error('[admin-member-security] operation failed', error.code || 'INTERNAL');
+      return res.status(500).json({error:'SERVER_ERROR', message:'처리를 마치지 못했어요. 제한 목록을 새로고침해 처리 상태를 확인해 주세요.'});
+    }
+  };
+}
+module.exports = makeHandler(admin);
+module.exports.makeHandler = makeHandler;

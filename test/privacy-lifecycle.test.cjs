@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {recentlyAuthenticated}=require('../lib/deletion-reauth');
-const {createRejoinCooldown}=require('../api/_ban');
+const {putRestriction}=require('../lib/member-restrictions');
 test('account deletion requires intent, fresh Google authentication or a matching single-use Kakao code',async()=>{
   const google={uid:'sample',firebase:{sign_in_provider:'google.com'},auth_time:100};
   const now=()=>400000;
@@ -18,7 +18,7 @@ test('every cooldown and identifier is scheduled for deletion at the end of the 
   const docs=[],batch={set:(_,data)=>docs.push(data),commit:async()=>{}};
   const db={batch:()=>batch,collection:()=>({doc:()=>({})})};
   const admin={firestore:{FieldValue:{serverTimestamp:()=>null}}};
-  const result=await createRejoinCooldown(admin,db,{uid:'fixture',identifiers:['sample']});
+  const result=putRestriction(batch,admin,db,'cooldown',{uid:'fixture',identifiers:['sample']});
   assert.equal(docs.length,4);
   for(const doc of docs)assert.equal(doc.expiresAt.getTime(),result.rejoinAllowedAtMs);
 });
