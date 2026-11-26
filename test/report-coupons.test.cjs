@@ -63,7 +63,7 @@ test('7 report products can be issued and listed with only metadata and a four-s
   const codes=[];
   for(const product of products) {
     const result=await f.issue({product});
-    assert.match(result.code,/^(?:[0-9A-HJKMNP-TV-Z]{4}-){7}[0-9A-HJKMNP-TV-Z]{4}$/);
+    assert.match(result.code,/^(?:[0-9A-HJKMNP-TV-Z]{4}-){3}[0-9A-HJKMNP-TV-Z]{4}$/);
     assert.equal(result.coupon.hint,result.code.slice(-4));
     assert.equal(result.coupon.expiresAtMs, f.now+30*86400000);
     assert.equal(result.coupon.product,product);
@@ -78,6 +78,15 @@ test('7 report products can be issued and listed with only metadata and a four-s
   assert.equal(listed.coupons.length,7);
   const stored=JSON.stringify([...f.rows])+JSON.stringify(listed);
   for(const code of codes) assert(!stored.includes(code) && !stored.includes(code.match(/.{4}/g).join('-')));
+});
+
+test('previously issued long codes redeem through their original lookup and remain single-account',async()=>{
+  const f=fixture(), id=randomUUID(), raw='ABCD1234'.repeat(4);
+  f.rows.set('reportCouponKeys/'+createHash('sha256').update(raw).digest('hex'),{couponId:id});
+  f.rows.set('reportCoupons/'+id,{status:'issued',product:products[0],issuedAtMs:f.now,hint:raw.slice(-4)});
+  const pass=await f.redeem(member,raw.toLowerCase().match(/.{4}/g).join('-'));
+  assert.equal(pass.pass.couponId,id);
+  await assert.rejects(f.redeem(other,raw),{code:'COUPON_UNAVAILABLE'});
 });
 
 test('only the verified Google administrator may issue, list or revoke and client-supplied privileges are ignored',async()=>{
