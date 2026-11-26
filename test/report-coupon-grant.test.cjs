@@ -7,6 +7,8 @@ const date=require('../lib/date-report');
 const relationship=require('../lib/relationship-report');
 const {NOTICE_VERSION}=require('../lib/ai-transfer-consent');
 const {recoveryChapters}=require('../lib/wealth-chapter-recovery');
+const {Firestore}=require('@google-cloud/firestore');
+const storage=new Firestore({projectId:'local-report-test'});
 
 const story={profile:{y:1990,m:1,d:1,calType:'solar',hourValue:'unknown',gender:'unknown'},choice:0};
 const dates={event:'결혼식',mine:'화',partner:'목',days:['2027-05-15','2027-05-16']};
@@ -47,7 +49,7 @@ test('a redeemed wealth coupon can finish, reopen and resume after an invalid ch
   const opened=await service.run(db,'member',{operation:'coupon-open',passId:coupon.id,comparison});
   const key='users/member/'+service.CONFIG.collection+'/'+opened.id;
   const record=rows.get(key);
-  record.attempts=2;
+  record.attempts=3;
   record.attemptWindow=Math.floor(Date.now()/3600000);
   let calls=0;
   const options={env:{ANTHROPIC_API_KEY:'unit-test'},fetchImpl:async(url,opts)=>{
@@ -62,6 +64,8 @@ test('a redeemed wealth coupon can finish, reopen and resume after an invalid ch
   const ready=await service.generate(db,'member',opened.id,options);
   assert.equal(ready.state,'ready');
   assert.equal(ready.report.body.length,5);
+  storage.batch().update(storage.doc('reports/test'),{report:rows.get(key).report});
+  assert.equal(rows.get(key).attempts,4);
   assert.equal(ready.report.body[0].highlight,'원국의 흐름을 연운과 함께 읽어 볼 때예요.');
   assert(!JSON.stringify(ready.report.body).includes('99월'));
   assert.deepEqual(rows.get(key).report.generation.recoveredChapters,[3]);
@@ -69,6 +73,10 @@ test('a redeemed wealth coupon can finish, reopen and resume after an invalid ch
   assert.equal(coupon.read().reportId,opened.id);
   assert.equal(unused.read().state,'available');
   assert.deepEqual((await service.generate(db,'member',opened.id,options)).report.body,ready.report.body);
+  assert.equal(calls,1);
+  // Simulate a distinct unfinished write after the one permitted legacy retry.
+  delete rows.get(key).report.body;
+  await assert.rejects(service.generate(db,'member',opened.id,options),{status:429});
   assert.equal(calls,1);
 });
 
@@ -81,6 +89,7 @@ test('calculated recovery chapters satisfy the same paid-report checks for diffe
     const plan=Array.from({length:5},(_,n)=>({title:'chapter '+n,requiredBasis:evidence[n%evidence.length].id}));
     const chapters=recoveryChapters(seed.calendar,plan,evidence);
     const body=service.checked({chapters},evidence,plan,seed.calendar);
+    storage.batch().update(storage.doc('reports/test'),{report:{...seed,body}});
     assert.equal(body.length,5);
     assert(body[2].highlight.startsWith(seed.calendar.ranking.opportunity[0]+'월'));
     assert(body[3].highlight.startsWith(seed.calendar.ranking.expense[0]+'월'));
