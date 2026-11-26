@@ -1,10 +1,6 @@
 const admin = require('firebase-admin');
-const {
-  buildIdentifiers,
-  findPermanentBan,
-  createRejoinCooldown,
-  deleteUserData
-} = require('./_ban');
+const {withdraw} = require('../lib/member-restrictions');
+const {deleteUserData, assertFreshSession} = require('./_ban');
 
 let db = null;
 let initError = null;
@@ -34,27 +30,12 @@ module.exports = async (req, res) => {
     const decoded = await admin.auth().verifyIdToken(header.slice(7).trim(), true);
     const uid = decoded && decoded.uid;
     if (!uid) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    await assertFreshSession(db, uid, decoded.auth_time);
     if (!await require('../lib/deletion-reauth').recentlyAuthenticated(decoded, req.body)) {
       return res.status(403).json({error:'REAUTH_REQUIRED',message:'같은 계정으로 본인 확인을 다시 한 뒤 탈퇴해 주세요.'});
     }
 
-    const identifiers = await buildIdentifiers(admin, db, uid, decoded);
-    const existingBan = await findPermanentBan(db, identifiers);
-    if (existingBan) return res.status(403).json({ error: 'ACCOUNT_BANNED', message: '관리자에 의해 이용이 제한된 계정입니다.' });
-
-    // 계정을 삭제하기 전에 먼저 재가입 제한 키를 저장해야 합니다.
-    const cooldown = await createRejoinCooldown(admin, db, {
-      uid,
-      identifiers,
-      days: COOLDOWN_DAYS,
-      reason: 'self_delete'
-    });
-
-    await require('../lib/inquiry-retention').deleteGeneralInquiries(db, uid);
-    await deleteUserData(db, uid);
-    await admin.auth().deleteUser(uid).catch((err) => {
-      if (!err || err.code !== 'auth/user-not-found') throw err;
-    });
+    const cooldown = await withdraw(admin, db, {uid, decoded, deleteUserData});
 
     return res.status(200).json({
       ok: true,
@@ -63,7 +44,8 @@ module.exports = async (req, res) => {
       rejoinAllowedAtMs: cooldown.rejoinAllowedAtMs
     });
   } catch (error) {
-    console.error('[member-self-delete] error:', error);
+    if (error.status) return res.status(error.status).json({error:error.code, message:error.message});
+    console.error('[member-self-delete] error:', error.code || 'INTERNAL');
     if (error && String(error.code || '').startsWith('auth/')) {
       return res.status(401).json({ error: 'UNAUTHORIZED', message: '회원 인증을 확인하지 못했습니다.' });
     }

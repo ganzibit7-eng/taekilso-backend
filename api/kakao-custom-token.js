@@ -145,7 +145,7 @@ module.exports = async (req, res) => {
     const account = me.kakao_account || {};
     const profileData = account.profile || {};
 
-    await assertMemberAllowed(admin.firestore(), {uid, email:account.is_email_verified===true?account.email:undefined});
+    await assertMemberAllowed(admin.firestore(), {uid, email:account.email,email_verified:account.is_email_verified===true});
 
     const customToken = await admin.auth().createCustomToken(uid, {
       loginProvider: 'kakao'

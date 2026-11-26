@@ -470,6 +470,8 @@ async function authenticateRequest(req) {
           return {
             uid: decoded.uid,
             provider: 'firebase',
+            firebase: decoded.firebase,
+            auth_time: decoded.auth_time,
             signInProvider: decoded.firebase?.sign_in_provider,
             email: String(decoded.email || '').trim().toLowerCase(),
             email_verified: decoded.email_verified === true

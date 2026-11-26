@@ -5,11 +5,6 @@ const BANS_COLLECTION = 'memberBans';
 
 // 이전/중간 버전과의 호환을 위해 재가입 제한 컬렉션 이름을 모두 읽습니다.
 const REJOIN_KEY_COLLECTIONS = ['rejoinBlockKeys', 'memberRejoinKeys'];
-const REJOIN_BLOCK_COLLECTIONS = ['rejoinBlocks', 'memberRejoinBlocks'];
-
-function normalizeEmail(v) {
-  return String(v || '').trim().toLowerCase();
-}
 
 function hashIdentifier(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
@@ -37,7 +32,7 @@ async function findPermanentBan(db, identifiers) {
     const banSnap = await db.collection(BANS_COLLECTION).doc(banId).get();
     if (!banSnap.exists) continue;
     const ban = banSnap.data() || {};
-    if (ban.active === false || ban.unbannedAt) continue;
+    if (ban.active === false || ban.unbannedAt || ban.unbannedAtMs) continue;
     return { banId, ...ban };
   }
   return null;
@@ -57,89 +52,13 @@ async function findRejoinCooldown(db, identifiers, now = Date.now()) {
   return null;
 }
 
-async function createRejoinCooldown(admin, db, { uid, identifiers, days = 30, reason = 'self_delete' }) {
-  const now = Date.now();
-  const rejoinAllowedAtMs = now + days * 24 * 60 * 60 * 1000;
-  const blockId = `RJ-${now}-${crypto.randomBytes(6).toString('hex')}`;
-  const hashes = uniq(identifiers).map(hashIdentifier);
-
-  const block = {
-    uid: String(uid || ''),
-    reason,
-    createdAtMs: now,
-    rejoinAllowedAtMs,
-    expiresAt: new Date(rejoinAllowedAtMs),
-    keyHashes: hashes,
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
-  };
-
-  const batch = db.batch();
-  for (const c of REJOIN_BLOCK_COLLECTIONS) batch.set(db.collection(c).doc(blockId), block, { merge: true });
-  for (const c of REJOIN_KEY_COLLECTIONS) {
-    for (const hash of hashes) {
-      batch.set(db.collection(c).doc(hash), {
-        blockId,
-        uid: String(uid || ''),
-        reason,
-        rejoinAllowedAtMs,
-        expiresAt: new Date(rejoinAllowedAtMs),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-    }
+async function assertFreshSession(db, uid, authTime) {
+  if (!Number.isInteger(authTime)) return;
+  const marker = await db.collection('rejoinBlockKeys').doc('SESSION-' + hashIdentifier('uid:' + uid)).get();
+  const cutoff = marker.data()?.revokedAuthTimeThrough;
+  if (Number.isInteger(cutoff) && authTime <= cutoff) {
+    throw Object.assign(new Error('이전 계정의 로그인 세션이에요. 다시 로그인해 주세요.'), {status:401, code:'TOKEN_REVOKED'});
   }
-  await batch.commit();
-  return { blockId, rejoinAllowedAtMs };
-}
-
-async function createPermanentBan(admin, db, { uid, identifiers, email = '', nickname = '', provider = '', reason = 'admin_force_delete', adminUid = '' }) {
-  const now = Date.now();
-  const banId = `BAN-${now}-${crypto.randomBytes(6).toString('hex')}`;
-  const hashes = uniq(identifiers).map(hashIdentifier);
-
-  const batch = db.batch();
-  batch.set(db.collection(BANS_COLLECTION).doc(banId), {
-    uid: String(uid || ''),
-    email: normalizeEmail(email),
-    nickname: String(nickname || ''),
-    provider: String(provider || ''),
-    reason,
-    active: true,
-    bannedAtMs: now,
-    bannedByUid: String(adminUid || ''),
-    keyHashes: hashes,
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
-  });
-
-  for (const hash of hashes) {
-    batch.set(db.collection(BAN_KEYS_COLLECTION).doc(hash), {
-      banId,
-      uid: String(uid || ''),
-      active: true,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-  }
-
-  await batch.commit();
-  return { banId, bannedAtMs: now };
-}
-
-async function unbanPermanent(admin, db, banId, adminUid = '') {
-  const ref = db.collection(BANS_COLLECTION).doc(String(banId || ''));
-  const snap = await ref.get();
-  if (!snap.exists) return false;
-  const data = snap.data() || {};
-  const hashes = Array.isArray(data.keyHashes) ? data.keyHashes : [];
-
-  const batch = db.batch();
-  batch.set(ref, {
-    active: false,
-    unbannedAtMs: Date.now(),
-    unbannedByUid: String(adminUid || ''),
-    unbannedAt: admin.firestore.FieldValue.serverTimestamp()
-  }, { merge: true });
-  for (const hash of hashes) batch.delete(db.collection(BAN_KEYS_COLLECTION).doc(hash));
-  await batch.commit();
-  return true;
 }
 
 async function deleteUserData(db, uid) {
@@ -169,8 +88,6 @@ module.exports = {
   buildIdentifiers,
   findPermanentBan,
   findRejoinCooldown,
-  createRejoinCooldown,
-  createPermanentBan,
-  unbanPermanent,
+  assertFreshSession,
   deleteUserData
 };
