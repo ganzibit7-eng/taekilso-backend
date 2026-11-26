@@ -6,6 +6,7 @@ const {reports}=require('../lib/seohwa-report');
 const date=require('../lib/date-report');
 const relationship=require('../lib/relationship-report');
 const {NOTICE_VERSION}=require('../lib/ai-transfer-consent');
+const {recoveryChapters}=require('../lib/wealth-chapter-recovery');
 
 const story={profile:{y:1990,m:1,d:1,calType:'solar',hourValue:'unknown',gender:'unknown'},choice:0};
 const dates={event:'결혼식',mine:'화',partner:'목',days:['2027-05-15','2027-05-16']};
@@ -38,6 +39,55 @@ function fixture(){
   }
   return {rows,db,add};
 }
+
+test('a redeemed wealth coupon can finish, reopen and resume after an invalid chapter without a second grant or AI call',async()=>{
+  const {db,rows,add}=fixture(), service=reports.get('dogyeom');
+  const coupon=add(service.CONFIG.product), unused=add(service.CONFIG.product);
+  const comparison={...story};
+  const opened=await service.run(db,'member',{operation:'coupon-open',passId:coupon.id,comparison});
+  const key='users/member/'+service.CONFIG.collection+'/'+opened.id;
+  const record=rows.get(key);
+  record.attempts=2;
+  record.attemptWindow=Math.floor(Date.now()/3600000);
+  let calls=0;
+  const options={env:{ANTHROPIC_API_KEY:'unit-test'},fetchImpl:async(url,opts)=>{
+    calls++;
+    const request=JSON.parse(opts.body),input=JSON.parse(request.messages[0].content);
+    const seed=record.report;
+    const chapters=recoveryChapters(seed.calendar,input.chapterPlan,[...seed.context.readings,...seed.context.supportingReadings||[]]);
+    chapters[0].highlight='원국의 흐름을 연운과 함께 읽어 볼 때예요.';
+    chapters[1].paragraphs[1]='확인되지 않은 99월을 실제처럼 적었어요.';
+    return {ok:true,json:async()=>({model:'fixture',stop_reason:'tool_use',content:[{type:'tool_use',name:request.tools[0].name,input:{chapters}}]})};
+  }};
+  const ready=await service.generate(db,'member',opened.id,options);
+  assert.equal(ready.state,'ready');
+  assert.equal(ready.report.body.length,5);
+  assert.equal(ready.report.body[0].highlight,'원국의 흐름을 연운과 함께 읽어 볼 때예요.');
+  assert(!JSON.stringify(ready.report.body).includes('99월'));
+  assert.deepEqual(rows.get(key).report.generation.recoveredChapters,[3]);
+  assert.equal(ready.questionsLeft,3);
+  assert.equal(coupon.read().reportId,opened.id);
+  assert.equal(unused.read().state,'available');
+  assert.deepEqual((await service.generate(db,'member',opened.id,options)).report.body,ready.report.body);
+  assert.equal(calls,1);
+});
+
+test('calculated recovery chapters satisfy the same paid-report checks for different charts and unknown birth times',()=>{
+  const service=reports.get('dogyeom'),signatures=new Set();
+  for(let i=0;i<72;i++){
+    const seed=service.calculate({profile:{...story.profile,y:1960+i%45,m:i%12+1,d:i%27+1,
+      hourValue:i%3?String(i%24):'unknown',gender:i%2?'female':'male'},choice:0});
+    const evidence=[...seed.context.readings,...seed.context.supportingReadings||[]];
+    const plan=Array.from({length:5},(_,n)=>({title:'chapter '+n,requiredBasis:evidence[n%evidence.length].id}));
+    const chapters=recoveryChapters(seed.calendar,plan,evidence);
+    const body=service.checked({chapters},evidence,plan,seed.calendar);
+    assert.equal(body.length,5);
+    assert(body[2].highlight.startsWith(seed.calendar.ranking.opportunity[0]+'월'));
+    assert(body[3].highlight.startsWith(seed.calendar.ranking.expense[0]+'월'));
+    signatures.add(body.map(ch=>ch.highlight).join('|'));
+  }
+  assert(signatures.size>30);
+});
 
 test('all four story reports, relationship and date use the same entitlement as a normal report, without a payment row',async()=>{
   for(const [service,comparison,isStory] of [...Array.from(reports.values(),service=>[service,story,true]),[date,dates,false],[relationship,pair,false]]){
