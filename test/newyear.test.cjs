@@ -65,6 +65,31 @@ test('standalone annual orders unlock the annual report only and a refunded orde
  assert.equal(result.body.paymentState,'cancelled');
  assert.equal(f.calls(),1);
 });
+test('a registered annual coupon opens only the annual report, survives retries and locks the generated profile',async()=>{
+ const annual=require('../lib/newyear-purchase'),f=serviceFixture({premium:false}),passId='10000000-0000-4000-8000-000000000001';
+ const key='users/member/reportCouponPasses/'+passId,expiresAt=new Date(Date.now()+3600000);
+ f.rows.set(key,{product:annual.CONFIG.product,state:'available',reportExpiresAt:expiresAt});
+ async function request(body){const r=res();await f.handler({body},r);return r;}
+ assert.equal((await request({operation:'status'})).body.access,false);
+ assert.equal(f.rows.get(key).state,'available');
+ assert.deepEqual((await request({operation:'coupon-open',passId})).body,{state:'owned'});
+ assert.equal(f.calls(),0);
+ const access=await request({operation:'status'});
+ assert.equal(access.body.access,true);
+ assert.equal(access.body.chatAccess,false);
+ assert.equal(access.body.expiresAtMs,+expiresAt);
+ const generated=await request({operation:'generate',profile});
+ assert.equal(generated.body.status,'ready');
+ assert.equal((await request({operation:'generate',profile})).body.status,'ready');
+ assert.equal((await request({operation:'generate',profile:{...profile,d:2}})).code,409);
+ assert.equal(f.calls(),1);
+ const saved=f.rows.get('newyearReports/'+reportId('member'));
+ assert.equal(saved.couponGrantId,passId);
+ assert.equal(saved.purchaseOrderId,undefined);
+ f.rows.set(key,{...f.rows.get(key),reportId:'other'});
+ assert.equal((await request({operation:'status'})).body.report,null);
+ assert.equal(f.events.some(([,key])=>key.startsWith('paymentOrders/')||key.startsWith('stats/')),false);
+});
 test('one report per account/year is cached, readable after expiry and locked to its profile',async()=>{const f=serviceFixture(),r=res();await f.handler({body:{operation:'generate',profile}},r);assert.equal(r.code,200);assert(validReport(r.body.report));const cached=res();await f.handler({body:{operation:'generate',profile}},cached);assert.equal(f.calls(),1);const mismatch=res();await f.handler({body:{operation:'generate',profile:{...profile,d:2}}},mismatch);assert.equal(mismatch.code,409);f.rows.set('users/member',{premium:false});const read=res();await f.handler({body:{operation:'status',uid:'someone-else'}},read);assert.equal(read.body.status,'ready');assert.equal(read.body.access,false);assert.equal(f.calls(),1);assert(f.rows.has('newyearReports/'+reportId('member')));});
 test('new standalone annual report follows its purchase deadline and cannot leak through an old return link',async()=>{
  const annual=require('../lib/newyear-purchase'),{FIELD}=require('../lib/report-retention');

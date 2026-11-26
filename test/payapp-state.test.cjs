@@ -137,6 +137,35 @@ test('서화 결제·본편·별도 상담 3회는 같은 회원과 결제에 �
 });
 const dateComparison={event:'결혼식',days:['2027-05-15','2027-05-16','2027-05-23'],mine:'화',partner:'목'};
 
+test('a delayed final PayApp refund reverses only the previous sale after the same report was opened using a coupon',async()=>{
+ const f=fixture(), coupons=require('../lib/report-coupons');
+ const admin={uid:'operator',email:require('../lib/admin-access').ADMIN_EMAIL,signInProvider:'google.com',email_verified:true};
+ const member={uid:'member'};
+ f.rows.set('siteSettings/checkout',{enabled:true});
+ const purchase=await dateReport.run(f.db,'member',{operation:'prepare',comparison:dateComparison,checkout:true});
+ const callback={var1:purchase.orderId,goodname:purchase.name,price:purchase.price};
+ assert.equal((await f.notify(4,callback)).body,'SUCCESS');
+ assert.equal((await f.notify(70,{...callback,price:100,orig_price:purchase.price,orig_mul_no:'synthetic',mul_no:'partial-coupon-test'})).body,'SUCCESS');
+ const issued=await coupons.run(f.db,admin,{action:'issue',product:dateReport.PRODUCT,requestId:require('node:crypto').randomUUID()});
+ const {pass}=await coupons.run(f.db,member,{action:'redeem',code:issued.code});
+ const opened=await dateReport.run(f.db,'member',{operation:'coupon-open',comparison:dateComparison,passId:pass.couponId});
+ assert.equal(opened.id,purchase.id);
+ assert.equal(opened.state,'ready');
+ assert.equal((await f.notify(9,callback)).body,'SUCCESS');
+ assert.equal((await f.notify(4,callback)).body,'SUCCESS');
+ assert.equal(f.rows.get('stats/counters').revenue,0);
+ assert.equal(f.rows.get('stats/counters').purchases,0);
+ const saved=f.rows.get('users/member/'+dateReport.COLLECTION+'/'+opened.id);
+ assert.equal(saved.couponGrantId,pass.couponId);
+ assert.equal(saved.paidOrderId,undefined);
+ assert.deepEqual(await dateReport.run(f.db,'member',{operation:'open',id:opened.id}),opened);
+ const retry=await coupons.run(f.db,member,{action:'redeem',code:issued.code});
+ assert.equal(retry.alreadyRedeemed,true);
+ assert.equal(retry.pass.state,'used');
+ assert.equal(retry.pass.reportId,opened.id);
+ assert.deepEqual((await coupons.run(f.db,member,{action:'wallet'})).passes,[]);
+});
+
 test('report expiry uses the Korean calendar anniversary, including leap days',()=>{
  const {anniversary}=require('../lib/report-retention');
  for(const [paid,expiry] of [
