@@ -555,6 +555,9 @@ module.exports = async (req, res) => {
   }
 
   if (req.body && req.body.action === 'newyear-report') {
+    if(req.body.operation==='coupon-open' && !/^Bearer \S+$/.test(String(req.headers?.authorization||'').trim())){
+      return res.status(401).json({error:'UNAUTHORIZED',message:'다시 로그인한 뒤 리포트 쿠폰을 사용해 주세요.'});
+    }
     try { return await createNewyearService({db, apiKey: ANTHROPIC_API_KEY, model: ANTHROPIC_MODEL,
       authenticate: async request => {
         const identity = await authenticateRequest(request);
@@ -565,7 +568,7 @@ module.exports = async (req, res) => {
         return identity;
       }
     })(req, res); } catch (error) {
-      if (error?.status === 403) return res.status(403).json({error:error.code,message:error.message,usageCharged:false});
+      if ([400,403,409,410].includes(error?.status)) return res.status(error.status).json({error:error.code,message:error.message,usageCharged:false});
       return res.status(503).json({error:'NEWYEAR_UNAVAILABLE',message:'신년운세를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.',usageCharged:false});
     }
   }
